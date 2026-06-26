@@ -8,7 +8,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=for-the-badge&logo=postgresql)
 ![License](https://img.shields.io/badge/License-Academic-D4AC0D?style=for-the-badge)
 
-**A fully automated, role-based university result management system **
+A fully automated, role-based university result management system 
 
 *Eliminates manual result compilation errors · Reduces result time from weeks to hours · Generates professional PDF result cards*
 

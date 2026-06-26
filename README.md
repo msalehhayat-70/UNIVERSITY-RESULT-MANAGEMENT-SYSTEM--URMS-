@@ -2,13 +2,13 @@
 
 <div align="center">
 
-![KICSIT](https://img.shields.io/badge/KICSIT-University-1E3A5F?style=for-the-badge)
+
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET_Core-8.0-512BD4?style=for-the-badge&logo=dotnet)
 ![Blazor](https://img.shields.io/badge/Blazor-WebAssembly-7B2FBE?style=for-the-badge&logo=blazor)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=for-the-badge&logo=postgresql)
 ![License](https://img.shields.io/badge/License-Academic-D4AC0D?style=for-the-badge)
 
-**A fully automated, role-based university result management system built for KICSIT**
+**A fully automated, role-based university result management system **
 
 *Eliminates manual result compilation errors · Reduces result time from weeks to hours · Generates professional PDF result cards*
 

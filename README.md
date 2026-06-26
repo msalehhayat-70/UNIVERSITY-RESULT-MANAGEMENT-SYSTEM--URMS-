@@ -234,7 +234,7 @@ From now on, only Examiner or HOD can create Teacher accounts
 
 ## 📐 GPA Calculation
 
-### Grade Scale (KICSIT Standard)
+### Grade Scale (Examplory using kICSIT University Standards)
 
 | Marks Range | Letter Grade | Grade Points |
 |-------------|-------------|-------------|
@@ -268,7 +268,7 @@ Adv. DB Systems Lab   → 1 CH × 3.00 (B)  =   3.00
 Applied Physics Lab   → 1 CH × 3.67 (A-) =   3.67
 
 Total Credit Hours = 17
-SGPA = 59.68 / 17 = 3.51 ✓ (matches KICSIT transcript exactly)
+SGPA = 59.68 / 17 = 3.51 ✓ (matches a university  transcript exactly)
 ```
 
 ### CGPA Formula

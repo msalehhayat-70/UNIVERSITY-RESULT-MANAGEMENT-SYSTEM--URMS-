@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next"                      Version="4.0.3"  />
+    <PackageReference Include="Microsoft.EntityFrameworkCore"        Version="8.0.0"  />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens"       Version="7.6.3"  />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt"      Version="7.6.3"  />
+    <PackageReference Include="itext7"                               Version="8.0.3"  />
+    <PackageReference Include="itext7.bouncy-castle-adapter"         Version="8.0.3"  />
+    <PackageReference Include="EPPlus"                               Version="7.0.4"  />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\URMS.Models\URMS.Models.csproj" />
+    <ProjectReference Include="..\URMS.Data\URMS.Data.csproj"     />
+  </ItemGroup>
+</Project>

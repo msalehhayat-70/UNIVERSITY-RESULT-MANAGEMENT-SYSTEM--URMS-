@@ -1,0 +1,172 @@
+@page "/"
+@page "/login"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject AuthStateService Auth
+@inject NavigationManager Nav
+
+<div class="login-page">
+    <div class="login-card">
+        <!-- Logo -->
+        <div class="login-logo">
+            <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:4px;">
+                <div style="width:40px;height:40px;border:2px solid var(--navy);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:var(--navy);">ist</div>
+                <div>
+                    <div style="font-size:1rem;font-weight:800;color:var(--navy);line-height:1.1;">KICSIT</div>
+                    <div style="font-size:0.65rem;color:var(--gray-400);line-height:1.1;">University Result Management System</div>
+                </div>
+                <div style="width:40px;height:40px;border:2px solid var(--navy);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:var(--navy);">🏛</div>
+            </div>
+        </div>
+
+        <!-- Registration status banner -->
+        @if (_canRegister && _regCount == 0)
+        {
+            <div class="alert alert-info" style="font-size:0.78rem;margin-bottom:14px;">
+                <strong>First Launch:</strong> Create the first two accounts — Examiner and HOD — then registration closes permanently.
+            </div>
+        }
+
+        <!-- Tabs -->
+        @if (_canRegister)
+        {
+            <div class="tab-row">
+                <button class="tab-btn @(_tab=="login"?"active":"")" @onclick='()=>{ _tab="login"; _error=null; }'>Sign In</button>
+                <button class="tab-btn @(_tab=="register"?"active":"")" @onclick='()=>{ _tab="register"; _error=null; }'>Create Account (@(2-_regCount) left)</button>
+            </div>
+        }
+        else
+        {
+            <p style="font-size:0.9rem;font-weight:600;color:var(--navy);margin-bottom:16px;">Sign In to Your Account</p>
+        }
+
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger" style="margin-bottom:14px;font-size:0.84rem;">@_error</div>
+        }
+        @if (_success is not null)
+        {
+            <div class="alert alert-success" style="margin-bottom:14px;font-size:0.84rem;">@_success</div>
+        }
+
+        <!-- Login form -->
+        @if (_tab == "login")
+        {
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" @bind="_email" @onkeydown="HandleKey" placeholder="you@kicsit.edu.pk" />
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" @bind="_password" @onkeydown="HandleKey" placeholder="••••••••" />
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px;"
+                    @onclick="DoLogin" disabled="@_busy">
+                @if (_busy) { <div class="spinner" style="width:14px;height:14px;border-width:2px;border-color:rgba(255,255,255,.3);border-top-color:white;"></div> }
+                Sign In
+            </button>
+        }
+
+        <!-- Register form -->
+        @if (_tab == "register")
+        {
+            <div class="alert alert-info" style="margin-bottom:12px;font-size:0.78rem;">
+                @if (_regCount == 0)
+                {
+                    <span>Account 1 of 2 → will be assigned <strong>Examiner</strong> role automatically.</span>
+                }
+                else
+                {
+                    <span>Account 2 of 2 → will be assigned <strong>HOD</strong> role automatically. Registration closes after this.</span>
+                }
+            </div>
+            <div class="form-group">
+                <label>Full Name *</label>
+                <input @bind="_regName" placeholder="Muhammad Saleh Hayat" />
+            </div>
+            <div class="form-group">
+                <label>Email Address *</label>
+                <input type="email" @bind="_regEmail" placeholder="you@kicsit.edu.pk" />
+            </div>
+            <div class="form-group">
+                <label>Password * (min 6 characters)</label>
+                <input type="password" @bind="_regPass" placeholder="••••••••" />
+            </div>
+            <button class="btn btn-gold" style="width:100%;justify-content:center;"
+                    @onclick="DoRegister" disabled="@_busy">
+                @if (_busy) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                Create Account
+            </button>
+        }
+
+        
+    </div>
+</div>
+
+@code {
+    string _tab = "login";
+    string _email="", _password="";
+    string _regName="", _regEmail="", _regPass="";
+    bool _busy, _canRegister;
+    int _regCount;
+    string? _error, _success;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (Auth.IsAuthenticated) { Redirect(); return; }
+
+        var (count, canReg) = await Auth.GetRegistrationStatusAsync();
+        _regCount    = count;
+        _canRegister = canReg;
+        // If only login is possible, ensure we're on login tab
+        if (!_canRegister) _tab = "login";
+    }
+
+    async Task DoLogin()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
+        { _error = "Please enter your email and password."; return; }
+
+        _busy = true;
+        var (ok, msg) = await Auth.LoginAsync(new LoginRequest { Email=_email, Password=_password });
+        _busy = false;
+
+        if (!ok) { _error = msg; return; }
+        Redirect();
+    }
+
+    async Task DoRegister()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_regName)||string.IsNullOrWhiteSpace(_regEmail)||string.IsNullOrWhiteSpace(_regPass))
+        { _error = "All fields are required."; return; }
+        if (_regPass.Length < 6) { _error = "Password must be at least 6 characters."; return; }
+
+        _busy = true;
+        var (ok, msg) = await Auth.RegisterAsync(new RegisterRequest
+            { FullName=_regName, Email=_regEmail, Password=_regPass });
+        _busy = false;
+
+        if (!ok) { _error = msg; return; }
+        _success = msg;
+        Redirect();
+    }
+
+    void Redirect()
+    {
+        Nav.NavigateTo(Auth.CurrentUser?.Role switch
+        {
+            "Examiner" => "/examiner",
+            "HOD"      => "/hod",
+            "Teacher"  => "/teacher",
+            _          => "/examiner"
+        });
+    }
+
+    async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoLogin();
+    }
+}

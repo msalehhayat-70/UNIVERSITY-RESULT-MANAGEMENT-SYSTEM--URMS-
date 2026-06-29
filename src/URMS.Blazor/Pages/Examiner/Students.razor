@@ -1,0 +1,263 @@
+@page "/examiner/students"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject ExaminerApiService ExamApi
+@inject StudentApiService StudentApi
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">Student Management</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">
+        Add and manage students for each batch. Students must be registered before grade sheets can be processed.
+    </p>
+</div>
+
+@if (_successMsg is not null) { <div class="alert alert-success">✓ @_successMsg</div> }
+@if (_errorMsg   is not null) { <div class="alert alert-danger">✕ @_errorMsg</div>   }
+
+<div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;">
+
+    <!-- Batch Selector -->
+    <div class="card" style="padding:16px;">
+        <div class="card-header"><h2>Select Batch</h2></div>
+        @if (_batches.Any())
+        {
+            @foreach (var b in _batches)
+            {
+                <div class="semester-row @(_selBatch?.BatchId == b.BatchId ? "selected" : "")"
+                     @onclick="() => SelectBatch(b)"
+                     style="margin-bottom:4px;border-radius:6px;">
+                    <div>
+                        <div style="font-weight:600;font-size:0.85rem;color:var(--navy)">@b.BatchName</div>
+                        <div style="font-size:0.72rem;color:var(--gray-400)">@b.ProgramName</div>
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="alert alert-info" style="font-size:0.82rem;">No batches yet. Create a batch first.</div>
+        }
+    </div>
+
+    <!-- Student List & Add Form -->
+    <div>
+        @if (_selBatch is not null)
+        {
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                    <div>
+                        <h2>@_selBatch.BatchName</h2>
+                        <p style="font-size:0.76rem;color:var(--gray-400);margin-top:2px;">
+                            @_students.Count students registered
+                        </p>
+                    </div>
+                    <button class="btn btn-primary btn-sm" @onclick="() => _showAdd = !_showAdd">
+                        @(_showAdd ? "✕ Cancel" : "+ Add Student")
+                    </button>
+                </div>
+
+                <!-- Add Student Form -->
+                @if (_showAdd)
+                {
+                    <div style="background:var(--blue-pale);border-radius:8px;padding:16px;margin-bottom:16px;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:var(--navy);margin-bottom:12px;">Add New Student</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Registration No *</label>
+                                <input @bind="_newReg" placeholder="e.g. 232201070" />
+                            </div>
+                            <div class="form-group">
+                                <label>Full Name *</label>
+                                <input @bind="_newName" placeholder="Muhammad Saleh Hayat" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Father Name *</label>
+                                <input @bind="_newFather" placeholder="Gul Nisar" />
+                            </div>
+                            <div class="form-group" style="display:flex;align-items:flex-end;">
+                                <button class="btn btn-gold" style="width:100%;" @onclick="AddStudent" disabled="@_saving">
+                                    @if (_saving) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                                    Add Student
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                <!-- Bulk Import Section -->
+                <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:16px;border:1px dashed var(--gray-100);">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div style="flex:1;">
+                            <div style="font-size:0.84rem;font-weight:600;color:var(--navy);">Bulk Import from Excel</div>
+                            <div style="font-size:0.74rem;color:var(--gray-400);margin-top:2px;">
+                                Format: Col A = Reg No, Col B = Full Name, Col C = Father Name
+                            </div>
+                        </div>
+                        <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            ⬆ Import Excel
+                            <InputFile OnChange="HandleBulkImport" accept=".xlsx,.xls" style="display:none;" />
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Student Table -->
+                @if (_students.Any())
+                {
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Reg No</th>
+                                    <th>Student Name</th>
+                                    <th>Father Name</th>
+                                    <th>Semester</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ int i = 1; }
+                                @foreach (var s in _students)
+                                {
+                                    <tr>
+                                        <td style="color:var(--gray-400)">@(i++)</td>
+                                        <td style="font-family:monospace;font-size:0.82rem;font-weight:600">@s.RegistrationNo</td>
+                                        <td style="font-weight:600">@s.FullName</td>
+                                        <td style="color:var(--gray-400)">@s.FatherName</td>
+                                        <td style="text-align:center">
+                                            <span class="credit-badge credit-theory">Sem @s.CurrentSemester</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn-icon" title="Deactivate student"
+                                                    @onclick="() => DeactivateStudent(s.StudentId)"
+                                                    style="color:var(--danger);">
+                                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="3 6 5 6 21 6"/>
+                                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                                                </svg>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info">
+                        No students registered for this batch yet. Add students individually or use bulk import.
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="card" style="text-align:center;padding:60px;">
+                <p style="color:var(--gray-400);font-size:0.88rem;">Select a batch from the left to manage its students.</p>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    List<BatchDto> _batches = new();
+    List<StudentDto> _students = new();
+    BatchDto? _selBatch;
+    bool _showAdd, _saving;
+    string _newReg = "", _newName = "", _newFather = "";
+    string? _successMsg, _errorMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _batches = await ExamApi.GetBatchesAsync();
+    }
+
+    async Task SelectBatch(BatchDto b)
+    {
+        _selBatch = b;
+        await LoadStudents();
+    }
+
+    async Task LoadStudents()
+    {
+        if (_selBatch is null) return;
+        _students = await StudentApi.GetByBatchAsync(_selBatch.BatchId);
+    }
+
+    async Task AddStudent()
+    {
+        if (string.IsNullOrWhiteSpace(_newReg) || string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newFather))
+        { _errorMsg = "All fields are required."; return; }
+
+        _saving = true;
+        var (ok, msg) = await StudentApi.AddStudentAsync(new CreateStudentRequest
+        {
+            RegistrationNo = _newReg, FullName = _newName,
+            FatherName = _newFather, BatchId = _selBatch!.BatchId
+        });
+        _saving = false;
+
+        if (ok)
+        {
+            _successMsg = msg;
+            _newReg = _newName = _newFather = "";
+            _showAdd = false;
+            await LoadStudents();
+        }
+        else _errorMsg = msg;
+        _ = ClearMsg();
+    }
+
+    async Task HandleBulkImport(InputFileChangeEventArgs e)
+    {
+        if (_selBatch is null) { _errorMsg = "Please select a batch first."; return; }
+        
+        var file = e.File;
+        if (file.Size > 10 * 1024 * 1024) { _errorMsg = "File is too large (max 10MB)."; return; }
+
+        _saving = true;
+        using var ms = new System.IO.MemoryStream();
+        await file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024).CopyToAsync(ms);
+        ms.Position = 0;
+
+        var (ok, msg, added) = await ExamApi.ImportStudentsAsync(ms, _selBatch.BatchId, file.Name);
+        _saving = false;
+
+        if (ok)
+        {
+            _successMsg = msg;
+            await LoadStudents();
+        }
+        else
+            _errorMsg = msg;
+
+        _ = ClearMsg();
+    }
+
+    async Task DeactivateStudent(int id)
+    {
+        if (_selBatch is null) return;
+        var (ok, msg) = await StudentApi.DeactivateStudentAsync(id);
+        
+        if (ok)
+        {
+            _successMsg = msg;
+            await LoadStudents();
+        }
+        else
+            _errorMsg = msg;
+
+        _ = ClearMsg();
+    }
+
+    async Task ClearMsg()
+    {
+        await Task.Delay(5000);
+        _successMsg = null;
+        _errorMsg = null;
+        StateHasChanged();
+    }
+}

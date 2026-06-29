@@ -1,0 +1,411 @@
+@page "/profile"
+@using URMS.Blazor.Services
+@using System.Net.Http.Json
+@inject AuthStateService Auth
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">
+        My Profile
+    </h1>
+
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">
+        View and update your account details.
+    </p>
+</div>
+
+@if (_successMsg is not null)
+{
+    <div class="alert alert-success" style="margin-bottom:16px;">
+        ✓ @_successMsg
+    </div>
+}
+
+@if (_errorMsg is not null)
+{
+    <div class="alert alert-danger" style="margin-bottom:16px;">
+        ✕ @_errorMsg
+    </div>
+}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:860px;">
+
+    <!-- LEFT SIDE -->
+    <div class="card">
+
+        <div class="card-header">
+            <h2>Account Information</h2>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:20px;">
+
+            <div style="
+                width:72px;
+                height:72px;
+                border-radius:50%;
+                background:var(--navy);
+                color:var(--gold);
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:1.7rem;
+                font-weight:700;
+                margin-bottom:10px;">
+
+                @GetInitials()
+
+            </div>
+
+            <div style="font-size:1rem;font-weight:700;color:var(--navy);">
+                @Auth.CurrentUser?.FullName
+            </div>
+
+            <span class="credit-badge @(GetRoleClass())"
+                  style="margin-top:6px;">
+
+                @Auth.CurrentUser?.Role
+
+            </span>
+        </div>
+
+        <div style="border-top:1px solid var(--gray-100);padding-top:16px;">
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                padding:8px 0;
+                border-bottom:1px solid var(--gray-100);
+                font-size:0.88rem;">
+
+                <span style="color:var(--gray-400);">
+                    Full Name
+                </span>
+
+                <span style="font-weight:600;color:var(--navy);">
+                    @(Auth.CurrentUser?.FullName ?? "—")
+                </span>
+            </div>
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                padding:8px 0;
+                border-bottom:1px solid var(--gray-100);
+                font-size:0.88rem;">
+
+                <span style="color:var(--gray-400);">
+                    Email
+                </span>
+
+                <span style="font-weight:600;color:var(--navy);">
+                    @(Auth.CurrentUser?.Email ?? "—")
+                </span>
+            </div>
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                padding:8px 0;
+                border-bottom:1px solid var(--gray-100);
+                font-size:0.88rem;">
+
+                <span style="color:var(--gray-400);">
+                    Role
+                </span>
+
+                <span style="font-weight:600;color:var(--navy);">
+                    @(Auth.CurrentUser?.Role ?? "—")
+                </span>
+            </div>
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                padding:8px 0;
+                font-size:0.88rem;">
+
+                <span style="color:var(--gray-400);">
+                    User ID
+                </span>
+
+                <span style="font-weight:600;color:var(--navy);">
+                    @(Auth.CurrentUser?.UserId.ToString() ?? "—")
+                </span>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- RIGHT SIDE -->
+    <div>
+
+        <!-- UPDATE NAME -->
+        <div class="card" style="margin-bottom:16px;">
+
+            <div class="card-header">
+                <h2>Update Name</h2>
+            </div>
+
+            <div class="form-group">
+                <label>Full Name</label>
+
+                <input @bind="_newName"
+                       placeholder="Enter your full name" />
+            </div>
+
+            <button class="btn btn-primary"
+                    @onclick="UpdateName"
+                    disabled="@_saving"
+                    style="display:flex;align-items:center;gap:8px;">
+
+                @if (_saving && _action == "name")
+                {
+                    <div class="spinner"
+                         style="
+                            width:14px;
+                            height:14px;
+                            border-width:2px;
+                            border-color:rgba(255,255,255,.3);
+                            border-top-color:white;">
+                    </div>
+                }
+
+                <span>Save Name</span>
+
+            </button>
+        </div>
+
+        <!-- CHANGE PASSWORD -->
+        <div class="card">
+
+            <div class="card-header">
+                <h2>Change Password</h2>
+            </div>
+
+            <div class="form-group">
+                <label>Current Password</label>
+
+                <input type="password"
+                       @bind="_currentPass"
+                       placeholder="••••••••" />
+            </div>
+
+            <div class="form-group">
+                <label>New Password</label>
+
+                <input type="password"
+                       @bind="_newPass"
+                       placeholder="Min 6 characters" />
+            </div>
+
+            <div class="form-group">
+                <label>Confirm New Password</label>
+
+                <input type="password"
+                       @bind="_confirmPass"
+                       placeholder="Repeat new password" />
+            </div>
+
+            <button class="btn btn-gold"
+                    @onclick="ChangePassword"
+                    disabled="@_saving"
+                    style="display:flex;align-items:center;gap:8px;">
+
+                @if (_saving && _action == "pass")
+                {
+                    <div class="spinner"
+                         style="
+                            width:14px;
+                            height:14px;
+                            border-width:2px;">
+                    </div>
+                }
+
+                <span>Change Password</span>
+
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+@code {
+
+    string _newName = "";
+    string _currentPass = "";
+    string _newPass = "";
+    string _confirmPass = "";
+
+    bool _saving;
+    string _action = "";
+
+    string? _successMsg;
+    string? _errorMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+
+        if (!Auth.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _newName = Auth.CurrentUser?.FullName ?? "";
+    }
+
+    async Task UpdateName()
+    {
+        _successMsg = null;
+        _errorMsg = null;
+
+        if (string.IsNullOrWhiteSpace(_newName))
+        {
+            _errorMsg = "Name cannot be empty.";
+            return;
+        }
+
+        _saving = true;
+        _action = "name";
+
+        try
+        {
+            var response = await Http.PutAsJsonAsync(
+                "api/profile/name",
+                new
+                {
+                    FullName = _newName
+                });
+
+            if (response.IsSuccessStatusCode)
+            {
+                await Auth.UpdateNameAsync(_newName);
+_successMsg = "Name updated successfully.";
+StateHasChanged();
+            }
+            else
+            {
+                _errorMsg = "Failed to update name.";
+            }
+        }
+        catch
+        {
+            _errorMsg = "Connection error.";
+        }
+        finally
+        {
+            _saving = false;
+
+            _ = ClearMsg();
+        }
+    }
+
+    async Task ChangePassword()
+    {
+        _successMsg = null;
+        _errorMsg = null;
+
+        if (string.IsNullOrWhiteSpace(_currentPass))
+        {
+            _errorMsg = "Enter current password.";
+            return;
+        }
+
+        if (_newPass.Length < 6)
+        {
+            _errorMsg = "New password must be at least 6 characters.";
+            return;
+        }
+
+        if (_newPass != _confirmPass)
+        {
+            _errorMsg = "Passwords do not match.";
+            return;
+        }
+
+        _saving = true;
+        _action = "pass";
+
+        try
+        {
+            var response = await Http.PutAsJsonAsync(
+                "api/profile/password",
+                new
+                {
+                    CurrentPassword = _currentPass,
+                    NewPassword = _newPass
+                });
+
+            if (response.IsSuccessStatusCode)
+            {
+                _successMsg = "Password changed. Logging out...";
+
+                _currentPass = "";
+                _newPass = "";
+                _confirmPass = "";
+
+                await Task.Delay(1500);
+
+                await Auth.LogoutAsync();
+
+                Nav.NavigateTo("/login");
+            }
+            else
+            {
+                _errorMsg = "Current password is incorrect.";
+
+                _currentPass = "";
+                _newPass = "";
+                _confirmPass = "";
+            }
+        }
+        catch
+        {
+            _errorMsg = "Connection error.";
+        }
+        finally
+        {
+            _saving = false;
+
+            _ = ClearMsg();
+        }
+    }
+
+    async Task ClearMsg()
+    {
+        await Task.Delay(5000);
+
+        _successMsg = null;
+        _errorMsg = null;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    string GetInitials()
+    {
+        var name = Auth.CurrentUser?.FullName;
+
+        if (string.IsNullOrWhiteSpace(name))
+            return "?";
+
+        return string.Concat(
+            name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x[0])
+                .Take(2)
+        ).ToUpper();
+    }
+
+    string GetRoleClass()
+    {
+        return Auth.CurrentUser?.Role switch
+        {
+            "Examiner" => "credit-theory",
+            "HOD" => "credit-lab",
+            _ => "gs-badge gs-approved"
+        };
+    }
+}

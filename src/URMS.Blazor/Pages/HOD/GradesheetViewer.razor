@@ -1,0 +1,325 @@
+@page "/hod/gradesheet/{GradesheetId:int}"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject HODApiService HodApi
+@inject NavigationManager Nav
+@layout EmptyLayout
+
+<PageTitle>Gradesheet Review</PageTitle>
+
+<style>
+    body { margin: 0; font-family: 'Inter', sans-serif; background: #f4f6fb; }
+    .gs-page { display: flex; flex-direction: column; height: 100vh; }
+    .gs-topbar { background: #1a2456; color: #fff; padding: 10px 24px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .gs-topbar h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+    .gs-topbar .meta { font-size: 0.78rem; color: #adb5d9; }
+    .gs-body { flex: 1; overflow: auto; padding: 16px 24px; }
+    .gs-bottombar { background: #fff; border-top: 2px solid #e8ecf5; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; box-shadow: 0 -2px 12px rgba(0,0,0,0.06); }
+    .excel-table { border-collapse: collapse; font-size: 0.82rem; min-width: 100%; }
+    .excel-table th { background: #1a2456; color: #fff; padding: 7px 12px; white-space: nowrap; font-weight: 600; border: 1px solid #2d3a7a; position: sticky; top: 0; z-index: 2; }
+    .excel-table td { padding: 5px 10px; border: 1px solid #e0e4f0; white-space: nowrap; }
+    .excel-table tr:nth-child(even) td { background: #f7f9fc; }
+    .excel-table tr:hover td { background: #eef2ff; }
+    .edit-cell { width: 80px; padding: 3px 6px; border: 2px solid #f5a623; border-radius: 4px; font-size: 0.85rem; text-align: center; background: #fffde7; font-weight: 600; }
+    .edit-cell:focus { outline: none; border-color: #e67e00; }
+    .reject-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .reject-box { background: #fff; border-radius: 12px; padding: 28px; width: 480px; box-shadow: 0 8px 40px rgba(0,0,0,0.18); }
+    .reject-box h3 { margin: 0 0 8px; color: #c0392b; }
+    .reject-box p { font-size: 0.85rem; color: #666; margin-bottom: 14px; }
+    .reject-box textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.88rem; resize: vertical; box-sizing: border-box; }
+    .reject-box-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+    .badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:0.72rem; font-weight:600; }
+    .badge-pending  { background:#FFF3CD; color:#856404; }
+    .badge-approved { background:#D4EDDA; color:#155724; }
+    .badge-rejected { background:#F8D7DA; color:#721c24; }
+    .badge-theory   { background:#dbeafe; color:#1e40af; }
+    .badge-lab      { background:#dcfce7; color:#166534; }
+    .customize-hint { background: #FFF9E6; border: 1px solid #f5a623; border-radius: 6px; padding: 8px 14px; font-size: 0.78rem; color: #856404; margin-bottom: 10px; }
+    .msg-success { background:#d4edda; border:1px solid #c3e6cb; color:#155724; padding:10px 16px; border-radius:6px; margin-bottom:12px; font-size:0.85rem; }
+    .msg-error   { background:#f8d7da; border:1px solid #f5c6cb; color:#721c24; padding:10px 16px; border-radius:6px; margin-bottom:12px; font-size:0.85rem; }
+</style>
+
+<div class="gs-page">
+
+    <div class="gs-topbar">
+        <div style="flex:1;">
+            <h2>@_subjectName <span style="font-family:monospace;font-size:0.8rem;opacity:0.7;">@_subjectCode</span></h2>
+            <div class="meta">@_teacherName &nbsp;·&nbsp; @_batchInfo</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            @if (_status == "Pending")  { <span class="badge badge-pending">Pending</span>   }
+            @if (_status == "Approved") { <span class="badge badge-approved">Approved</span> }
+            @if (_status == "Rejected") { <span class="badge badge-rejected">Rejected</span> }
+            @if (_subjectType == "Theory") { <span class="badge badge-theory">Theory</span> }
+            else { <span class="badge badge-lab">Laboratory</span> }
+            <span style="font-size:0.78rem;opacity:0.7;">@_creditHours CH</span>
+        </div>
+    </div>
+
+    <div class="gs-body">
+        @if (_loading)
+        {
+            <div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;">
+                <div class="spinner"></div><span style="color:#666;">Loading gradesheet...</span>
+            </div>
+        }
+        else if (_excelRows.Any())
+        {
+            @if (_successMsg is not null) { <div class="msg-success">? @_successMsg</div> }
+            @if (_errorMsg   is not null) { <div class="msg-error">? @_errorMsg</div>     }
+
+            @if (_customizeMode)
+            {
+                <div class="customize-hint">
+                    ? <strong>Customize Mode:</strong> All cells are editable. Click any cell to modify its value. Click <strong>Save &amp; Approve</strong> when done.
+                </div>
+            }
+
+            <div style="overflow:auto;border:1px solid #e0e4f0;border-radius:8px;">
+                <table class="excel-table">
+                    <thead>
+                        <tr>
+                            @foreach (var cell in _excelRows[0])
+                            {
+                                <th>@cell</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int ri = 1; ri < _editableRows.Count; ri++)
+                        {
+                            var row = _editableRows[ri];
+                            var capturedRi = ri;
+                            <tr>
+                                @for (int ci = 0; ci < row.Count; ci++)
+                                {
+                                    var capturedCi = ci;
+                                    @if (_customizeMode)
+                                    {
+                                        <td>
+                                            <input class="edit-cell"
+                                                   value="@row[capturedCi]"
+                                                   @oninput="(e) => UpdateCell(capturedRi, capturedCi, e.Value?.ToString() ?? string.Empty)"
+                                                   style="width:75px;" />
+                                        </td>
+                                    }
+                                    else
+                                    {
+                                        <td>@row[capturedCi]</td>
+                                    }
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div style="text-align:center;padding:60px;color:#666;">Could not load gradesheet file.</div>
+        }
+    </div>
+
+    <div class="gs-bottombar">
+        <div style="display:flex;gap:10px;">
+            <button class="btn btn-danger" @onclick="OpenRejectDialog" disabled="@_acting">? Reject</button>
+            @if (!_customizeMode)
+            {
+                <button class="btn btn-ghost" @onclick="()=>_customizeMode=true">? Customize</button>
+            }
+            else
+            {
+                <button class="btn btn-ghost" @onclick="CancelCustomize">Cancel Edit</button>
+                <button class="btn btn-gold" @onclick="DoSaveCustomize" disabled="@_acting">
+                    @if (_acting) { <span>Saving...</span> }
+                    Save &amp; Approve
+                </button>
+            }
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+            <span style="font-size:0.78rem;color:#888;">@(_excelRows.Count > 1 ? $"{_excelRows.Count - 1} rows" : "")</span>
+            <button class="btn btn-ghost" @onclick='()=>Nav.NavigateTo("/hod")'>? Back</button>
+            @if (!_customizeMode)
+            {
+                <button class="btn btn-gold" style="min-width:120px;" @onclick="DoApprove" disabled="@_acting">
+                    @if (_acting) { <span>...</span> }
+                    ? Approve
+                </button>
+            }
+        </div>
+    </div>
+</div>
+
+@if (_showRejectDialog)
+{
+    <div class="reject-overlay" @onclick="()=>_showRejectDialog=false">
+        <div class="reject-box" @onclick:stopPropagation="true">
+            <h3>? Reject Gradesheet</h3>
+            <p>Please provide remarks for the teacher explaining what needs to be corrected.</p>
+            <textarea @bind="_rejectRemarks" rows="5"
+                      placeholder="e.g. Marks for Q2 appear incorrect. Please verify and re-upload..."></textarea>
+            @if (_rejectError is not null)
+            {
+                <div style="color:#c0392b;font-size:0.82rem;margin-top:6px;">@_rejectError</div>
+            }
+            <div class="reject-box-footer">
+                <button class="btn btn-ghost btn-sm" @onclick="()=>_showRejectDialog=false">Cancel</button>
+                <button class="btn btn-danger" @onclick="DoReject" disabled="@_acting">
+                    Send Back to Teacher
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int GradesheetId { get; set; }
+
+    List<List<string>> _excelRows    = new();
+    List<List<string>> _editableRows = new();
+    bool   _loading          = true;
+    bool   _customizeMode    = false;
+    bool   _acting           = false;
+    bool   _showRejectDialog = false;
+    string _subjectName  = "";
+    string _subjectCode  = "";
+    string _teacherName  = "";
+    string _batchInfo    = "";
+    string _status       = "";
+    string _subjectType  = "";
+    int    _creditHours  = 0;
+    string _rejectRemarks = "";
+    string? _rejectError;
+    string? _successMsg;
+    string? _errorMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        var (ok, rows) = await HodApi.PreviewGradesheetAsync(GradesheetId);
+        if (ok && rows.Any())
+        {
+            _excelRows    = rows;
+            _editableRows = rows.Select(r => r.ToList()).ToList();
+        }
+
+        try
+        {
+            var batches = await HodApi.GetBatchesAsync();
+            foreach (var batch in batches)
+            {
+                foreach (var sem in batch.Semesters)
+                {
+                    var sheets = await HodApi.GetGradsheetsAsync(sem.BatchSemesterId);
+                    var gs     = sheets.FirstOrDefault(g => g.GradesheetId == GradesheetId);
+                    if (gs != null)
+                    {
+                        _subjectName = gs.SubjectName;
+                        _subjectCode = gs.SubjectCode;
+                        _teacherName = gs.TeacherName;
+                        _batchInfo   = $"{batch.BatchName} — Sem {sem.SemesterNo}";
+                        _status      = gs.Status;
+                        _subjectType = gs.SubjectType;
+                        _creditHours = gs.CreditHours;
+                        break;
+                    }
+                }
+                if (!string.IsNullOrEmpty(_subjectName)) break;
+            }
+        }
+        catch { }
+
+        _loading = false;
+    }
+
+    void UpdateCell(int rowIndex, int colIndex, string value)
+    {
+        if (rowIndex < _editableRows.Count && colIndex < _editableRows[rowIndex].Count)
+            _editableRows[rowIndex][colIndex] = value;
+    }
+
+    void OpenRejectDialog()
+    {
+        _rejectRemarks    = "";
+        _rejectError      = null;
+        _showRejectDialog = true;
+    }
+
+    void CancelCustomize()
+    {
+        _customizeMode = false;
+        _editableRows  = _excelRows.Select(r => r.ToList()).ToList();
+    }
+
+    async Task DoApprove()
+    {
+        _acting = true;
+        var (ok, msg) = await HodApi.ApproveAsync(GradesheetId);
+        _acting = false;
+        if (ok)
+        {
+            _status     = "Approved";
+            _successMsg = "Gradesheet approved. Teacher has been notified.";
+            await Task.Delay(2000);
+            Nav.NavigateTo("/hod");
+        }
+        else _errorMsg = msg;
+    }
+
+    async Task DoReject()
+    {
+        if (string.IsNullOrWhiteSpace(_rejectRemarks))
+        {
+            _rejectError = "Please enter remarks before rejecting.";
+            return;
+        }
+        _acting = true;
+        var (ok, msg) = await HodApi.RejectAsync(GradesheetId, _rejectRemarks);
+        _acting = false;
+        if (ok)
+        {
+            _showRejectDialog = false;
+            _status     = "Rejected";
+            _successMsg = "Gradesheet rejected. Teacher has been notified with your remarks.";
+            await Task.Delay(2000);
+            Nav.NavigateTo("/hod");
+        }
+        else _rejectError = msg;
+    }
+
+    async Task DoSaveCustomize()
+    {
+        _acting   = true;
+        _errorMsg = null;
+        try
+        {
+            var headers  = _excelRows.Any() ? _excelRows[0] : new List<string>();
+            int regNoCol = 1;
+            int totalCol = headers.Count > 0 ? headers.Count - 1 : 0;
+            for (int c = 0; c < headers.Count; c++)
+            {
+                var h = headers[c].ToLower().Trim();
+                if (h.Contains("reg")) regNoCol = c;
+                if (h.Contains("total") || h.Contains("grand") || h.Contains("final")) totalCol = c;
+            }
+            var (ok, msg) = await HodApi.CustomiseWithGridAsync(GradesheetId, _editableRows, regNoCol, totalCol);
+            _acting = false;
+            if (ok)
+            {
+                _status        = "Approved";
+                _customizeMode = false;
+                _successMsg    = "Gradesheet customised and approved.";
+                await Task.Delay(2000);
+                Nav.NavigateTo("/hod");
+            }
+            else _errorMsg = msg;
+        }
+        catch (Exception ex)
+        {
+            _acting   = false;
+            _errorMsg = $"Error: {ex.Message}";
+        }
+    }
+}
+C:\Users\mezan\OneDrive\Pictures\URMS\src\URMS.API

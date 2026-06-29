@@ -1,0 +1,237 @@
+@inherits LayoutComponentBase
+@using URMS.Blazor.Services
+@inject AuthStateService Auth
+@inject NavigationManager Nav
+@inject NotificationStateService NotifState
+@inject ExaminerApiService ExamApi
+@inject HODApiService HodApi
+@inject TeacherApiService TeacherApi
+@inject JsInteropService Js
+@implements IAsyncDisposable
+
+@if (!Auth.IsAuthenticated)
+{
+    @Body
+}
+else
+{
+    <div class="app-shell">
+        <!-- ── Sidebar ────────────────────────────────────────────────── -->
+        <nav class="sidebar">
+            <div class="sidebar-logo">
+                <h1>URMS</h1>
+                <p>KICSIT — @Auth.CurrentUser!.Role</p>
+            </div>
+
+            @if (Auth.CurrentUser.Role == "Examiner")
+            {
+                <div class="nav-section">
+                    <div class="nav-label">Main</div>
+                    <NavLink class="nav-item" href="/examiner" Match="NavLinkMatch.All">
+                        <SvgIcon Name="grid"/>Dashboard
+                    </NavLink>
+                    <NavLink class="nav-item" href="/examiner/students">
+                        <SvgIcon Name="users"/>Students
+                    </NavLink>
+                    <NavLink class="nav-item" href="/examiner/teachers">
+                        <SvgIcon Name="user-plus"/>Teachers
+                    </NavLink>
+                    <NavLink class="nav-item" href="/examiner/results">
+                        <SvgIcon Name="file-text"/>Results
+                    </NavLink>
+                </div>
+            }
+            else if (Auth.CurrentUser.Role == "HOD")
+            {
+                <div class="nav-section">
+                    <div class="nav-label">Main</div>
+                    <NavLink class="nav-item" href="/hod" Match="NavLinkMatch.All">
+                        <SvgIcon Name="grid"/>Dashboard
+                    </NavLink>
+                    <NavLink class="nav-item" href="/hod/analytics">
+                        <SvgIcon Name="bar-chart"/>Analytics
+                    </NavLink>
+                </div>
+            }
+            else if (Auth.CurrentUser.Role == "Teacher")
+            {
+                <div class="nav-section">
+                    <div class="nav-label">Main</div>
+                    <NavLink class="nav-item" href="/teacher" Match="NavLinkMatch.All">
+                        <SvgIcon Name="grid"/>Dashboard
+                    </NavLink>
+                </div>
+            }
+
+            <div class="nav-section">
+                <div class="nav-label">Account</div>
+                <NavLink class="nav-item" href="/profile">
+                    <SvgIcon Name="user"/>My Profile
+                </NavLink>
+            </div>
+
+            <div class="sidebar-bottom">
+                <button class="nav-item"
+                    style="width:100%;border:none;background:transparent;text-align:left;cursor:pointer;color:rgba(255,255,255,0.6);"
+                    @onclick="Logout">
+                    <SvgIcon Name="log-out"/>Sign Out
+                </button>
+            </div>
+        </nav>
+
+        <!-- ── Main area ─────────────────────────────────────────────── -->
+        <div class="main-area">
+            <!-- Topbar -->
+            <div class="topbar">
+                <div class="topbar-greeting">
+                    <h2>@Auth.Greeting, @Auth.CurrentUser.FullName</h2>
+                    <p style="font-size:0.74rem;color:var(--gray-400);">
+                        @DateTime.Now.ToString("dddd, MMMM d, yyyy")
+                        &nbsp;—&nbsp;
+                        @DateTime.Now.ToString("hh:mm tt")
+                    </p>
+                </div>
+                <div class="topbar-actions">
+                    <!-- Bell -->
+                    <button class="notif-btn" @onclick="ToggleNotif" title="Notifications">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                             stroke="var(--navy)" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                        </svg>
+                        @if (NotifState.UnreadCount > 0)
+                        {
+                            <span class="notif-badge">
+                                @(NotifState.UnreadCount > 9 ? "9+" : NotifState.UnreadCount.ToString())
+                            </span>
+                        }
+                    </button>
+                    <!-- Avatar → Profile -->
+                    <NavLink href="/profile" style="text-decoration:none;">
+                        <div class="avatar" title="@Auth.CurrentUser.FullName">
+                            @Auth.CurrentUser.FullName[0].ToString().ToUpper()
+                        </div>
+                    </NavLink>
+                </div>
+            </div>
+
+            <!-- Notification panel -->
+            @if (_showNotif)
+            {
+                <div class="notif-panel">
+                    <div class="notif-panel-header">
+                        <h4>Notifications (@NotifState.UnreadCount unread)</h4>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            @if (NotifState.Notifications.Any(n => !n.IsRead))
+                            {
+                                <button class="btn-icon" style="font-size:0.72rem;"
+                                        @onclick="MarkAllRead">Mark all read</button>
+                            }
+                            <button class="btn-icon" @onclick="() => _showNotif = false">✕</button>
+                        </div>
+                    </div>
+                    <div class="notif-list">
+                        @if (NotifState.Notifications.Any())
+                        {
+                            @foreach (var n in NotifState.Notifications)
+                            {
+                                <div class="notif-item @(n.IsRead ? "" : "unread")"
+                                     @onclick="() => MarkOneRead(n.NotifId)">
+                                    <div class="notif-title">@n.Title</div>
+                                    <div class="notif-msg">@n.Message</div>
+                                    <div class="notif-time">
+                                        @n.CreatedAt.ToString("dd MMM yyyy, hh:mm tt")
+                                    </div>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="notif-empty">No notifications yet.</div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <!-- Page body -->
+            <div class="page-content">@Body</div>
+        </div>
+    </div>
+}
+
+
+
+@code {
+    bool _showNotif;
+
+    void OnAuthStateChanged() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+
+        Auth.OnAuthChanged += OnAuthStateChanged;
+
+        if (Auth.IsAuthenticated)
+        {
+            await RefreshNotifs();
+            Js.OnPollNotifications += RefreshNotifs;
+            await Js.StartPollingAsync(45_000);
+        }
+
+        NotifState.OnChanged += StateHasChanged;
+    }
+
+    async Task RefreshNotifs()
+    {
+        if (!Auth.IsAuthenticated) return;
+        try
+        {
+            List<NotificationDto> notifs;
+            if (Auth.CurrentUser!.Role == "Examiner")
+                notifs = await ExamApi.GetNotificationsAsync();
+            else if (Auth.CurrentUser.Role == "HOD")
+                notifs = await HodApi.GetNotificationsAsync();
+            else
+                notifs = await TeacherApi.GetNotificationsAsync();
+
+            NotifState.Update(notifs);
+        }
+        catch { }
+    }
+
+    void ToggleNotif() => _showNotif = !_showNotif;
+
+    async Task MarkOneRead(int id)
+    {
+        try
+        {
+            if (Auth.CurrentUser!.Role == "Examiner")      await ExamApi.MarkReadAsync(id);
+            else if (Auth.CurrentUser.Role == "HOD")       await HodApi.MarkReadAsync(id);
+            else                                            await TeacherApi.MarkReadAsync(id);
+        }
+        catch { }
+        await RefreshNotifs();
+    }
+
+    async Task MarkAllRead()
+    {
+        foreach (var n in NotifState.Notifications.Where(n => !n.IsRead))
+            await MarkOneRead(n.NotifId);
+    }
+
+    async Task Logout()
+    {
+        await Js.StopPollingAsync();
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/login");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Js.OnPollNotifications -= RefreshNotifs;
+        NotifState.OnChanged   -= StateHasChanged;
+        Auth.OnAuthChanged     -= OnAuthStateChanged;
+        await Js.DisposeAsync();
+    }
+}

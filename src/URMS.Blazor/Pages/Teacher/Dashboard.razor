@@ -1,0 +1,189 @@
+@page "/teacher"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject TeacherApiService TeacherApi
+@inject AuthStateService Auth
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">Teacher Dashboard</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">Upload grade sheets for your assigned subjects.</p>
+</div>
+
+@if (_loading) { <div class="loading-center"><div class="spinner"></div><span>Loading...</span></div> }
+else
+{
+    @if (_successMsg is not null) { <div class="alert alert-success">✓ @_successMsg</div> }
+    @if (_errorMsg   is not null) { <div class="alert alert-danger">✕ @_errorMsg</div>   }
+
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-number">@_subjects.Count</div><div class="stat-label">Assigned Subjects</div></div>
+        <div class="stat-card green"><div class="stat-number">@_subjects.Count(s=>s.GradesheetStatus=="Approved")</div><div class="stat-label">Approved</div></div>
+        <div class="stat-card gold"><div class="stat-number">@_subjects.Count(s=>s.GradesheetStatus=="Pending")</div><div class="stat-label">Pending Review</div></div>
+        <div class="stat-card red"><div class="stat-number">@_subjects.Count(s=>s.GradesheetStatus=="Rejected")</div><div class="stat-label">Rejected</div></div>
+    </div>
+
+    <!-- Upload format reminder -->
+    <div class="card" style="margin-bottom:16px;padding:14px 20px;background:var(--blue-pale);border-left:4px solid var(--navy);">
+        <div style="font-size:0.84rem;font-weight:700;color:var(--navy);margin-bottom:4px;">📋 Excel Upload Format</div>
+        <div style="font-size:0.8rem;color:var(--gray-700);">
+            Row 1: Header row &nbsp;|&nbsp;
+            <strong>Col A:</strong> Registration No &nbsp;|&nbsp;
+            <strong>Col B:</strong> Student Name &nbsp;|&nbsp;
+            <strong>Col C:</strong> Marks Obtained (numeric, 0–100)
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>My Assigned Subjects</h2></div>
+        @if (_subjects.Any())
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>#</th><th>Batch / Semester</th><th>Subject</th><th>Type</th><th>CH</th><th>Status</th><th>HOD Remarks</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                        @{ int i=1; }
+                        @foreach (var s in _subjects)
+                        {
+                            <tr style="@(s.GradesheetStatus=="Rejected"?"background:#FFF5F5;":"")">
+                                <td style="color:var(--gray-400);">@(i++)</td>
+                                <td>
+                                    <div style="font-weight:600;font-size:0.83rem;color:var(--navy);">@s.BatchName</div>
+                                    <div style="font-size:0.72rem;color:var(--gray-400);">Semester @s.SemesterNo</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:600;">@s.SubjectName</div>
+                                    <div style="font-size:0.72rem;color:var(--gray-400);font-family:monospace;">@s.SubjectCode</div>
+                                </td>
+                                <td><span class="credit-badge @(s.SubjectType=="Theory"?"credit-theory":"credit-lab")">@s.SubjectType</span></td>
+                                <td style="text-align:center;font-weight:700;">@s.CreditHours</td>
+                                <td>
+                                    <span class="gs-badge @Badge(s.GradesheetStatus)">@s.GradesheetStatus</span>
+                                    @if (s.UploadedAt.HasValue)
+                                    {
+                                        <div style="font-size:0.7rem;color:var(--gray-400);margin-top:2px;">@s.UploadedAt.Value.ToString("dd MMM HH:mm")</div>
+                                    }
+                                </td>
+                                <td style="max-width:180px;">
+                                    @if (!string.IsNullOrEmpty(s.HodRemarks))
+                                    {
+                                        <span style="font-size:0.75rem;color:var(--danger);">@s.HodRemarks</span>
+                                    }
+                                    else { <span style="color:var(--gray-400);font-size:0.75rem;">—</span> }
+                                </td>
+                                <td>
+                                    @if (s.GradesheetStatus=="Not Uploaded")
+                                    {
+                                        <label class="btn btn-gold btn-sm" style="cursor:pointer;">
+                                            ⬆ Upload
+                                            <InputFile OnChange="(e)=>HandleUpload(e,s,false)" accept=".xlsx,.xls" style="display:none;" />
+                                        </label>
+                                    }
+                                    else if (s.GradesheetStatus=="Rejected")
+                                    {
+                                        <label class="btn btn-gold btn-sm" style="cursor:pointer;background:var(--danger);">
+                                            ⬆ Re-upload
+                                            <InputFile OnChange="(e)=>HandleUpload(e,s,true)" accept=".xlsx,.xls" style="display:none;" />
+                                        </label>
+                                    }
+                                    else if (s.GradesheetStatus=="Pending")
+                                    {
+                                        <span style="font-size:0.75rem;color:var(--warning);">⏳ Awaiting HOD</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="font-size:0.75rem;color:var(--success);">✓ Approved</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">No subjects assigned yet. Contact the Examiner to register subjects for the semester.</div>
+        }
+    </div>
+}
+
+<!-- Upload progress overlay -->
+@if (_uploading)
+{
+    <div class="modal-overlay">
+        <div style="background:white;border-radius:12px;padding:32px;text-align:center;min-width:280px;">
+            <div class="spinner" style="width:36px;height:36px;border-width:4px;margin:0 auto 16px;"></div>
+            <div style="font-weight:600;color:var(--navy);margin-bottom:4px;">Uploading Grade Sheet...</div>
+            <div style="font-size:0.82rem;color:var(--gray-400);">Parsing Excel and calculating grades</div>
+        </div>
+    </div>
+}
+
+@code {
+    List<AssignedSubjectDto> _subjects = new();
+    bool _loading=true, _uploading;
+    string? _successMsg, _errorMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var dash = await TeacherApi.GetDashboardAsync();
+            _subjects = dash?.AssignedSubjects ?? new();
+        }
+        catch { _subjects = new(); }
+        _loading = false;
+    }
+
+    async Task HandleUpload(InputFileChangeEventArgs e, AssignedSubjectDto subj, bool isReupload)
+    {
+        var file = e.File;
+        if (file is null) return;
+        if (!file.Name.EndsWith(".xlsx") && !file.Name.EndsWith(".xls"))
+        { _errorMsg="Please upload an Excel file (.xlsx or .xls)"; return; }
+        if (file.Size > 10 * 1024 * 1024)
+        { _errorMsg="File too large. Maximum 10MB."; return; }
+
+        _uploading = true;
+        try
+        {
+            using var ms = new System.IO.MemoryStream();
+            await file.OpenReadStream(maxAllowedSize: 10*1024*1024).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+
+            (bool ok, string msg) result;
+            if (isReupload && subj.GradesheetId.HasValue)
+                result = await TeacherApi.ReuploadGradesheetAsync(subj.GradesheetId.Value, bytes, file.Name);
+            else
+                result = await TeacherApi.UploadGradesheetAsync(subj.SubjectConfigId, bytes, file.Name);
+
+            if (result.ok)
+            {
+                _successMsg = result.msg;
+                subj.GradesheetStatus = "Pending";
+                subj.HodRemarks       = null;
+                subj.UploadedAt       = DateTime.Now;
+            }
+            else _errorMsg = result.msg;
+        }
+        catch (Exception ex) { _errorMsg = $"Upload failed: {ex.Message}"; }
+        finally { _uploading = false; }
+
+        _ = ClearMsg();
+    }
+
+    async Task ClearMsg()
+    {
+        await Task.Delay(6000);
+        _successMsg=null; _errorMsg=null;
+        StateHasChanged();
+    }
+
+    static string Badge(string s) => s switch
+    {
+        "Approved" => "gs-approved","Rejected" => "gs-rejected",
+        "Pending"  => "gs-pending", _          => "gs-not-uploaded"
+    };
+}

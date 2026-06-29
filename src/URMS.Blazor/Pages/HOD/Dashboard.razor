@@ -1,0 +1,550 @@
+@page "/hod"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject HODApiService HodApi
+@inject ExaminerApiService ExamApi
+@inject NavigationManager Nav
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">HOD Dashboard</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">Review and approve grade sheets for all batches.</p>
+</div>
+
+@if (_loading) { <div class="loading-center"><div class="spinner"></div><span>Loading...</span></div> }
+else
+{
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-number">@_batches.Count</div><div class="stat-label">Active Batches</div></div>
+        <div class="stat-card red"><div class="stat-number">@_pending</div><div class="stat-label">Pending Review</div></div>
+        <div class="stat-card green"><div class="stat-number">@_approved</div><div class="stat-label">Approved</div></div>
+        <div class="stat-card gold"><div class="stat-number">@_rejected</div><div class="stat-label">Rejected</div></div>
+    </div>
+
+    @if (_successMsg is not null) { <div class="alert alert-success" style="margin-bottom:12px;">✓ @_successMsg</div> }
+    @if (_errorMsg   is not null) { <div class="alert alert-danger"  style="margin-bottom:12px;">✕ @_errorMsg</div>   }
+
+    <div style="display:grid;grid-template-columns:310px 1fr;gap:20px;align-items:start;">
+
+        <!-- Batch tree -->
+        <div class="card" style="padding:16px;">
+            <div class="card-header"><h2>Batches</h2></div>
+            <div class="batch-tree">
+                @foreach (var batch in _batches)
+                {
+                    <div class="batch-node">
+                        <div class="batch-header @(_open.Contains(batch.BatchId) ? "open" : "")" @onclick="()=>Toggle(batch.BatchId)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <h3>@batch.BatchName</h3>
+                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                        @if (_open.Contains(batch.BatchId))
+                        {
+                            <div class="semester-list">
+                                @foreach (var sem in batch.Semesters)
+                                {
+                                    var pct = sem.TotalSubjects > 0 ? (int)((double)sem.ApprovedSubjects / sem.TotalSubjects * 100) : 0;
+                                    <div class="semester-row @(_selSem?.BatchSemesterId == sem.BatchSemesterId ? "selected" : "")"
+                                         @onclick="()=>SelectSem(batch,sem)">
+                                        <span class="semester-label">Semester @sem.SemesterNo</span>
+                                        <div class="semester-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill @(pct==100 ? "complete" : "")" style="width:@pct%;"></div>
+                                            </div>
+                                            <span class="progress-text">@sem.ApprovedSubjects/@sem.TotalSubjects</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Gradesheet panel -->
+        <div>
+            @if (_selSem is not null)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>@_selBatch?.BatchName — Semester @_selSem.SemesterNo</h2>
+                            <p style="font-size:0.76rem;color:var(--gray-400);margin-top:2px;">
+                                @_gradesheets.Count subjects &nbsp;·&nbsp;
+                                @_gradesheets.Count(g => g.Status == "Approved") approved &nbsp;·&nbsp;
+                                @_gradesheets.Count(g => g.Status == "Pending") pending &nbsp;·&nbsp;
+                                @_gradesheets.Count(g => g.Status == "Rejected") rejected
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="tab-row" style="margin-bottom:14px;">
+                        @foreach (var t in new[] { "All", "Pending", "Approved", "Rejected", "Not Uploaded" })
+                        {
+                            <button class="tab-btn @(_tab == t ? "active" : "")" @onclick="()=>_tab=t">@t</button>
+                        }
+                    </div>
+
+                    @{ var shown = _tab == "All" ? _gradesheets : _gradesheets.Where(g => g.Status == _tab).ToList(); }
+
+                    @if (_gsLoading) { <div class="loading-center"><div class="spinner"></div></div> }
+                    else if (shown.Any())
+                    {
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr><th>#</th><th>Subject</th><th>Type</th><th>CH</th><th>Teacher</th><th>Status</th><th>AI Alert</th><th>Uploaded</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody>
+                                    @{ int i = 1; }
+                                    @foreach (var gs in shown)
+                                    {
+                                        <tr>
+                                            <td style="color:var(--gray-400)">@(i++)</td>
+                                            <td>
+                                                <div style="font-weight:600;font-size:0.84rem;">@gs.SubjectName</div>
+                                                <div style="color:var(--gray-400);font-size:0.72rem;font-family:monospace;">@gs.SubjectCode</div>
+                                            </td>
+                                            <td><span class="credit-badge @(gs.SubjectType == "Theory" ? "credit-theory" : "credit-lab")">@gs.SubjectType</span></td>
+                                            <td style="text-align:center;font-weight:700;">@gs.CreditHours</td>
+                                            <td>
+                                                <div style="font-size:0.82rem;font-weight:600;">@gs.TeacherName</div>
+                                                <div style="font-size:0.72rem;color:var(--gray-400);">@gs.TeacherEmail</div>
+                                            </td>
+                                            <td><span class="gs-badge @Badge(gs.Status)">@gs.Status</span></td>
+                                            <td>
+                                                @if (_alerts.TryGetValue(gs.GradesheetId, out var alert))
+                                                {
+                                                    <span title="@alert" style="cursor:help;font-size:1rem;">⚠️</span>
+                                                }
+                                            </td>
+                                            <td style="font-size:0.75rem;color:var(--gray-400);">
+                                                @(gs.UploadedAt > DateTime.MinValue ? gs.UploadedAt.ToString("dd MMM HH:mm") : "—")
+                                            </td>
+                                            <td>
+                                                @if (gs.GradesheetId > 0)
+                                                {
+                                                    <a class="btn btn-primary btn-sm" href="/hod/gradesheet/@gs.GradesheetId" target="_blank">View</a>
+                                                }
+                                                else
+                                                {
+                                                    <span style="font-size:0.72rem;color:var(--gray-400);">Not uploaded</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                        @if (!string.IsNullOrEmpty(gs.HodRemarks) && gs.Status == "Rejected")
+                                        {
+                                            <tr>
+                                                <td colspan="9">
+                                                    <div class="alert alert-warning" style="margin:4px;font-size:0.78rem;">
+                                                        <strong>Remarks:</strong> @gs.HodRemarks
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                        @if (_alerts.TryGetValue(gs.GradesheetId, out var alertMsg))
+                                        {
+                                            <tr>
+                                                <td colspan="9">
+                                                    <div class="alert alert-warning" style="margin:4px;font-size:0.78rem;background:#FFF9E6;">
+                                                        <strong>🤖 AI Alert:</strong> @alertMsg
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else { <div class="alert alert-info">No grade sheets in this category.</div> }
+                </div>
+            }
+            else
+            {
+                <div class="card" style="text-align:center;padding:60px;">
+                    <p style="color:var(--gray-400);">Select a batch and semester to review grade sheets.</p>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<!-- Gradesheet Viewer Modal -->
+@if (_viewerGs is not null)
+{
+    <div class="modal-overlay" @onclick="CloseViewer">
+        <div class="modal" style="width:1100px;max-width:98vw;" @onclick:stopPropagation="true">
+
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin:0;">@_viewerGs.SubjectName <span style="font-family:monospace;font-size:0.8rem;color:var(--gray-400);">@_viewerGs.SubjectCode</span></h3>
+                    <div style="display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;">
+                        <span class="credit-badge @(_viewerGs.SubjectType == "Theory" ? "credit-theory" : "credit-lab")">@_viewerGs.SubjectType</span>
+                        <span class="credit-badge credit-theory">@_viewerGs.CreditHours CH</span>
+                        <span style="font-size:0.8rem;color:var(--gray-400);">@_viewerGs.TeacherName</span>
+                        <span class="gs-badge @Badge(_viewerGs.Status)">@_viewerGs.Status</span>
+                    </div>
+                </div>
+                <button class="btn-icon" @onclick="CloseViewer">✕</button>
+            </div>
+
+            <div class="modal-body" style="max-height:72vh;overflow-y:auto;">
+
+                @if (_alerts.TryGetValue(_viewerGs.GradesheetId, out var alertMsg2))
+                {
+                    <div class="alert alert-warning" style="margin-bottom:12px;font-size:0.82rem;">
+                        <strong>🤖 AI Alert:</strong> @alertMsg2
+                    </div>
+                }
+
+                <!-- Excel Preview / Customize Section -->
+                <div style="margin-bottom:16px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <div style="font-weight:600;font-size:0.85rem;color:var(--navy);">
+                            📄 Gradesheet (Excel View)
+                        </div>
+                        @if (_customizeMode)
+                        {
+                            <span style="font-size:0.78rem;color:var(--warning);font-weight:600;">✏ Edit mode — modify the Total Marks column</span>
+                        }
+                    </div>
+
+                    @if (_excelLoading)
+                    {
+                        <div class="loading-center"><div class="spinner"></div><span>Loading file...</span></div>
+                    }
+                    else if (_excelRows.Any())
+                    {
+                        <div class="table-wrap" style="max-height:320px;overflow:auto;border:1px solid var(--gray-100);border-radius:6px;">
+                            <table style="font-size:0.78rem;">
+                                <thead>
+                                    <tr style="background:var(--navy);color:#fff;">
+                                        @for (int ci = 0; ci < _excelRows[0].Count; ci++)
+                                        {
+                                            <th style="padding:6px 12px;white-space:nowrap;font-weight:600;">@_excelRows[0][ci]</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (int ri = 1; ri < _excelRows.Count; ri++)
+                                    {
+                                        var row = _excelRows[ri];
+                                        var em  = _customizeMode && ri - 1 < _editMarks.Count ? _editMarks[ri - 1] : null;
+                                        <tr style="@(ri % 2 == 0 ? "background:#f7f9fc;" : "")">
+                                            @for (int ci = 0; ci < row.Count; ci++)
+                                            {
+                                                @if (_customizeMode && em != null && ci == _totalMarksCol)
+                                                {
+                                                    <td style="padding:4px 8px;">
+                                                        <input type="number" min="0" max="100" step="0.5"
+                                                               value="@em.MarksObtained"
+                                                               @onchange="(e) => UpdateMark(em, e)"
+                                                               style="width:70px;padding:3px 6px;border:2px solid var(--gold);border-radius:4px;font-size:0.85rem;text-align:center;font-weight:700;" />
+                                                    </td>
+                                                }
+                                                else
+                                                {
+                                                    <td style="padding:5px 12px;white-space:nowrap;">@row[ci]</td>
+                                                }
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (_customizeMode)
+                        {
+                            <div class="alert alert-warning" style="margin-top:8px;font-size:0.78rem;">
+                                The highlighted column (Total Marks) is editable. Changes will be saved and approved when you click Save & Approve.
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning" style="font-size:0.82rem;">Could not load Excel file preview.</div>
+                    }
+                </div>
+
+                <!-- Remarks -->
+                <div class="form-group" style="margin-top:14px;">
+                    <label>Remarks <span style="color:var(--gray-400);font-size:0.78rem;">(required when rejecting)</span></label>
+                    <textarea @bind="_remarks" rows="2" placeholder="Describe what needs correcting..."
+                              style="width:100%;padding:8px;border:1px solid var(--gray-100);border-radius:6px;font-size:0.85rem;"></textarea>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="modal-footer" style="justify-content:space-between;">
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-danger btn-sm" @onclick="DoReject" disabled="@_acting">Reject</button>
+                    @if (!_customizeMode)
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="EnterCustomize">✏ Customize</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="ExitCustomize">Cancel Edit</button>
+                        <button class="btn btn-gold btn-sm" @onclick="DoSaveCustomize" disabled="@_acting">
+                            @if (_acting) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                            Save & Approve
+                        </button>
+                    }
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-ghost btn-sm" @onclick="CloseViewer">Close</button>
+                    @if (!_customizeMode)
+                    {
+                        <button class="btn btn-gold" @onclick="DoApprove" disabled="@_acting">
+                            @if (_acting) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                            Approve
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    List<BatchDto> _batches = new();
+    List<GradesheetReviewDto> _gradesheets = new();
+    Dictionary<int, string> _alerts = new();
+    HashSet<int> _open = new();
+    BatchDto? _selBatch;
+    BatchSemesterDto? _selSem;
+    GradesheetReviewDto? _viewerGs;
+    List<EditableMark> _editMarks = new();
+    List<List<string>> _excelRows = new();
+    bool _customizeMode = false;
+    bool _excelLoading  = false;
+    int  _totalMarksCol = -1;
+    string _tab = "All", _remarks = "";
+    bool _loading = true, _gsLoading, _acting;
+    int _pending, _approved, _rejected;
+    string? _successMsg, _errorMsg;
+
+    protected override async Task OnInitializedAsync() => await LoadDashboard();
+
+    async Task LoadDashboard()
+    {
+        _loading = true;
+        try
+        {
+            _batches  = await HodApi.GetBatchesAsync();
+            _pending  = _batches.SelectMany(b => b.Semesters).Sum(s => s.UploadedSubjects - s.ApprovedSubjects);
+            _approved = _batches.SelectMany(b => b.Semesters).Sum(s => s.ApprovedSubjects);
+            _rejected = 0;
+        }
+        catch { _batches = new(); }
+        _loading = false;
+    }
+
+    void Toggle(int id) { if (!_open.Add(id)) _open.Remove(id); }
+
+    async Task SelectSem(BatchDto b, BatchSemesterDto s)
+    {
+        _selBatch = b; _selSem = s; _tab = "All"; _gsLoading = true;
+        _gradesheets = await HodApi.GetGradsheetsAsync(s.BatchSemesterId);
+        _rejected    = _gradesheets.Count(g => g.Status == "Rejected");
+        _alerts.Clear();
+        _gsLoading = false;
+    }
+
+    async Task OpenViewer(GradesheetReviewDto gs)
+    {
+        if (gs.GradesheetId <= 0)
+        {
+            _errorMsg = "This gradesheet has not been uploaded yet.";
+            _ = ClearMsg();
+            return;
+        }
+
+        _viewerGs      = gs;
+        _remarks       = "";
+        _customizeMode = false;
+        _excelRows     = new();
+        _editMarks     = new();
+        _totalMarksCol = -1;
+
+        _excelLoading = true;
+        StateHasChanged();
+        var (ok, rows) = await HodApi.PreviewGradesheetAsync(gs.GradesheetId);
+        _excelRows = ok ? rows : new();
+        _excelLoading = false;
+
+        // Find total marks column from header row
+        if (_excelRows.Any())
+        {
+            var headers = _excelRows[0];
+            // Look for "Total" column (last numeric-looking column)
+            for (int c = headers.Count - 1; c >= 0; c--)
+            {
+                var h = headers[c].ToLower();
+                if (h.Contains("total") || h.Contains("grand") || h.Contains("final"))
+                {
+                    _totalMarksCol = c;
+                    break;
+                }
+            }
+            // If not found, use last column
+            if (_totalMarksCol < 0) _totalMarksCol = headers.Count - 1;
+
+            // Build editable marks from Excel rows
+            _editMarks = _excelRows.Skip(1).Select(row =>
+            {
+                var regNo = row.Count > 1 ? row[1] : "";
+                var name  = row.Count > 2 ? row[2] : "";
+                decimal.TryParse(_totalMarksCol >= 0 && _totalMarksCol < row.Count
+                    ? row[_totalMarksCol] : "0", out decimal m);
+                return new EditableMark
+                {
+                    StudentId      = 0,
+                    RegistrationNo = regNo,
+                    StudentName    = name,
+                    MarksObtained  = m,
+                    OriginalMarks  = m,
+                    Grade          = CalcGrade(m),
+                    GradePoints    = CalcGP(m)
+                };
+            }).ToList();
+        }
+
+        StateHasChanged();
+    }
+
+    void CloseViewer()
+    {
+        _viewerGs = null; _customizeMode = false;
+        _editMarks = new(); _excelRows = new();
+        _totalMarksCol = -1;
+    }
+
+    void EnterCustomize() => _customizeMode = true;
+
+    void ExitCustomize()
+    {
+        _customizeMode = false;
+        foreach (var m in _editMarks)
+        {
+            m.MarksObtained = m.OriginalMarks;
+            m.Grade         = CalcGrade(m.MarksObtained);
+            m.GradePoints   = CalcGP(m.MarksObtained);
+        }
+    }
+
+    void UpdateMark(EditableMark m, ChangeEventArgs e)
+    {
+        if (decimal.TryParse(e.Value?.ToString(), out decimal val))
+        {
+            val             = Math.Clamp(val, 0, 100);
+            m.MarksObtained = val;
+            m.Grade         = CalcGrade(val);
+            m.GradePoints   = CalcGP(val);
+        }
+    }
+
+    async Task DoApprove()
+    {
+        if (_viewerGs is null) return;
+        _acting = true;
+        var (ok, msg) = await HodApi.ApproveAsync(_viewerGs.GradesheetId);
+        _acting = false;
+        if (ok)
+        {
+            _successMsg = $"'{_viewerGs.SubjectName}' approved. Teacher notified.";
+            CloseViewer();
+            await SelectSem(_selBatch!, _selSem!);
+            await LoadDashboard();
+        }
+        else _errorMsg = msg;
+        _ = ClearMsg();
+    }
+
+    async Task DoReject()
+    {
+        if (_viewerGs is null) return;
+        if (string.IsNullOrWhiteSpace(_remarks)) { _errorMsg = "Enter remarks before rejecting."; _ = ClearMsg(); return; }
+        _acting = true;
+        var (ok, msg) = await HodApi.RejectAsync(_viewerGs.GradesheetId, _remarks);
+        _acting = false;
+        if (ok)
+        {
+            _successMsg = $"'{_viewerGs.SubjectName}' rejected. Teacher notified.";
+            CloseViewer();
+            await SelectSem(_selBatch!, _selSem!);
+        }
+        else _errorMsg = msg;
+        _ = ClearMsg();
+    }
+
+    async Task DoSaveCustomize()
+    {
+        if (_viewerGs is null) return;
+        _acting = true;
+        var updates = _editMarks.Select(m => new MarkUpdateDto
+        {
+            StudentId     = m.StudentId,
+            MarksObtained = m.MarksObtained
+        }).ToList();
+        var (ok, msg) = await HodApi.CustomiseAsync(_viewerGs.GradesheetId, updates);
+        _acting = false;
+        if (ok)
+        {
+            _successMsg = $"'{_viewerGs.SubjectName}' customised and approved.";
+            CloseViewer();
+            await SelectSem(_selBatch!, _selSem!);
+            await LoadDashboard();
+        }
+        else _errorMsg = msg;
+        _ = ClearMsg();
+    }
+
+    async Task ClearMsg()
+    {
+        await Task.Delay(5000);
+        _successMsg = null; _errorMsg = null;
+        StateHasChanged();
+    }
+
+    static string CalcGrade(decimal m) => m switch
+    {
+        >= 85 => "A",  >= 80 => "A-", >= 75 => "B+",
+        >= 71 => "B",  >= 68 => "B-", >= 64 => "C+",
+        >= 61 => "C",  >= 58 => "C-", >= 54 => "D+",
+        >= 50 => "D",  _     => "F"
+    };
+
+    static decimal CalcGP(decimal m) => m switch
+    {
+        >= 85 => 4.00m, >= 80 => 3.67m, >= 75 => 3.33m,
+        >= 71 => 3.00m, >= 68 => 2.67m, >= 64 => 2.33m,
+        >= 61 => 2.00m, >= 58 => 1.67m, >= 54 => 1.33m,
+        >= 50 => 1.00m, _     => 0.00m
+    };
+
+    static string Badge(string s) => s switch
+    {
+        "Approved" => "gs-approved", "Rejected" => "gs-rejected",
+        "Pending"  => "gs-pending",  _          => "gs-not-uploaded"
+    };
+
+    static string GradeCol(string g) => g switch
+    {
+        "A" or "A-"         => "var(--success)",
+        "B+" or "B" or "B-" => "var(--navy)",
+        "F"                 => "var(--danger)",
+        _                   => "var(--warning)"
+    };
+
+    class EditableMark
+    {
+        public int     StudentId      { get; set; }
+        public string  RegistrationNo { get; set; } = "";
+        public string  StudentName    { get; set; } = "";
+        public decimal MarksObtained  { get; set; }
+        public decimal OriginalMarks  { get; set; }
+        public string  Grade          { get; set; } = "";
+        public decimal GradePoints    { get; set; }
+    }
+}C:\Users\mezan\OneDrive\Pictures\URMS\src\URMS.API

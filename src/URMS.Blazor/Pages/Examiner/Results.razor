@@ -1,0 +1,226 @@
+@page "/examiner/results"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject ExaminerApiService ExamApi
+@inject JsInteropService Js
+@inject HttpClient Http
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">Result Generation</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">Generate and download results for approved semesters.</p>
+</div>
+
+@if (_loading) { <div class="loading-center"><div class="spinner"></div><span>Loading...</span></div> }
+else
+{
+    @if (_successMsg is not null) { <div class="alert alert-success" style="margin-bottom:16px;">✓ @_successMsg</div> }
+    @if (_errorMsg   is not null) { <div class="alert alert-danger"  style="margin-bottom:16px;">✕ @_errorMsg</div> }
+
+    @if (_result is not null)
+    {
+        <div class="card" style="margin-bottom:20px;border-left:4px solid var(--gold);">
+            <div class="card-header">
+                <div>
+                    <h2>@_result.BatchName — Semester @_result.SemesterNo</h2>
+                    <p style="font-size:0.78rem;color:var(--gray-400);margin-top:2px;">Generated @_result.GeneratedAt.ToString("dd MMM yyyy, hh:mm tt")</p>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-primary btn-sm" @onclick="()=>DownloadClassPdf(_result.BatchSemesterId)" disabled="@_downloading">
+                        @if(_downloading&&_dlType=="class"){<div class="spinner" style="width:12px;height:12px;border-width:2px;border-color:rgba(255,255,255,.3);border-top-color:white;"></div>}
+                        ⬇ Class PDF
+                    </button>
+                    <button class="btn btn-ghost btn-sm" @onclick="()=>DownloadAllCards(_result.BatchSemesterId)" disabled="@_downloading">
+                        @if(_downloading&&_dlType=="cards"){<div class="spinner" style="width:12px;height:12px;border-width:2px;"></div>}
+                        ⬇ All Cards ZIP
+                    </button>
+                </div>
+            </div>
+            <div class="alert alert-info" style="margin-bottom:16px;font-size:0.85rem;">
+                <span style="font-size:1rem;margin-right:8px;">🤖</span>@_result.AISummary
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+                <div style="text-align:center;padding:14px;background:var(--blue-pale);border-radius:8px;">
+                    <div style="font-size:1.8rem;font-weight:700;color:var(--navy);">@_result.TotalStudents</div>
+                    <div style="font-size:0.72rem;color:var(--gray-400);">Total</div>
+                </div>
+                <div style="text-align:center;padding:14px;background:#D5F5E3;border-radius:8px;">
+                    <div style="font-size:1.8rem;font-weight:700;color:var(--success);">@_result.PassedStudents</div>
+                    <div style="font-size:0.72rem;color:var(--success);">Passed</div>
+                </div>
+                <div style="text-align:center;padding:14px;background:#FADBD8;border-radius:8px;">
+                    <div style="font-size:1.8rem;font-weight:700;color:var(--danger);">@_result.FailedStudents</div>
+                    <div style="font-size:0.72rem;color:var(--danger);">Failed</div>
+                </div>
+                <div style="text-align:center;padding:14px;background:#FEF9E7;border-radius:8px;">
+                    <div style="font-size:1.8rem;font-weight:700;color:var(--warning);">@_result.ClassAverageSGPA.ToString("F2")</div>
+                    <div style="font-size:0.72rem;color:var(--warning);">Avg SGPA</div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Rank</th><th>Reg No</th><th>Name</th><th>CH</th><th>SGPA</th><th>CGPA</th><th>Result</th><th>Card</th></tr></thead>
+                    <tbody>
+                        @{ int rank=1; }
+                        @foreach(var st in _result.StudentResults.OrderByDescending(s=>s.SGPA))
+                        {
+                            <tr>
+                                <td style="color:var(--gray-400);font-weight:700;">@(rank++)</td>
+                                <td style="font-family:monospace;font-size:0.82rem;">@st.RegistrationNo</td>
+                                <td style="font-weight:600;">@st.FullName</td>
+                                <td style="text-align:center;">@st.TotalCreditHours</td>
+                                <td style="font-weight:700;color:@GpaColor((double)st.SGPA);">@st.SGPA.ToString("F2")</td>
+                                <td style="font-weight:700;color:@GpaColor((double)st.CGPA);">@st.CGPA.ToString("F2")</td>
+                                <td>@if(st.IsPass){<span class="gs-badge gs-approved">PASS</span>}else{<span class="gs-badge gs-rejected">FAIL</span>}</td>
+                                <td>
+                                    <button class="btn-icon" @onclick="()=>DownloadCard(_result.BatchSemesterId,st.StudentId,st.RegistrationNo)">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                                        </svg>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-header"><h2>All Batches — Generate Results</h2></div>
+        @foreach(var batch in _batches)
+        {
+            <div style="margin-bottom:18px;">
+                <h3 style="font-size:0.9rem;font-weight:700;color:var(--navy);margin-bottom:8px;padding:8px 14px;background:var(--blue-pale);border-radius:6px;">@batch.BatchName</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:8px;padding:0 4px;">
+                    @foreach(var sem in batch.Semesters)
+                    {
+                        <div style="border:1px solid var(--gray-100);border-radius:8px;padding:14px;background:white;">
+                            <div style="font-weight:700;font-size:0.85rem;color:var(--navy);margin-bottom:4px;">Semester @sem.SemesterNo</div>
+                            <div style="font-size:0.72rem;color:var(--gray-400);margin-bottom:8px;">@sem.ApprovedSubjects/@sem.TotalSubjects approved</div>
+                            @if(sem.IsResultGenerated)
+                            {
+                                <span class="semester-status status-done" style="display:inline-block;margin-bottom:6px;">✓ Done</span><br/>
+                                <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                                    <button class="btn btn-ghost btn-sm" @onclick="()=>DownloadClassPdf(sem.BatchSemesterId)">PDF</button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="()=>DownloadAllCards(sem.BatchSemesterId)">ZIP</button>
+                                </div>
+                            }
+                            else if(sem.CanGenerateResult)
+                            {
+                                <span class="semester-status status-ready" style="display:inline-block;margin-bottom:6px;">Ready</span><br/>
+                                <button class="btn btn-gold btn-sm" @onclick="()=>ConfirmGenerate(batch,sem)"
+                                        disabled="@(_generating&&_genSemId==sem.BatchSemesterId)">
+                                    @if(_generating&&_genSemId==sem.BatchSemesterId){<div class="spinner" style="width:12px;height:12px;border-width:2px;"></div>}
+                                    Generate
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="semester-status status-pending" style="display:inline-block;">Pending HOD</span>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if(_confirmBatch is not null)
+{
+    <div class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header"><h3>Confirm Result Generation</h3></div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <div>
+                        <strong>@_confirmBatch.BatchName — Semester @_confirmSem!.SemesterNo</strong><br/>
+                        <span style="font-size:0.82rem;margin-top:4px;display:block;">
+                            Computes credit-hour-weighted SGPA &amp; CGPA for all students.
+                            PDFs available immediately after. Cannot be undone.
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @onclick="()=>{_confirmBatch=null;_confirmSem=null;}">Cancel</button>
+                <button class="btn btn-gold" @onclick="ExecuteGenerate" disabled="@_generating">
+                    @if(_generating){<div class="spinner" style="width:14px;height:14px;border-width:2px;"></div>}
+                    Generate Results
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    List<BatchDto> _batches=new();
+    ResultSummaryDto? _result;
+    BatchDto? _confirmBatch; BatchSemesterDto? _confirmSem;
+    bool _loading=true,_generating,_downloading;
+    int _genSemId; string _dlType="";
+    string? _successMsg,_errorMsg;
+
+   protected override async Task OnInitializedAsync()
+{
+    try
+    {
+        _batches = await ExamApi.GetBatchesAsync();
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+    {
+        _loading = false;
+        return;
+    }
+    catch { }
+    finally
+    {
+        _loading = false;
+    }
+}
+
+    void ConfirmGenerate(BatchDto b,BatchSemesterDto s){_confirmBatch=b;_confirmSem=s;}
+
+    async Task ExecuteGenerate()
+    {
+        if(_confirmSem is null) return;
+        _genSemId=_confirmSem.BatchSemesterId; _generating=true;
+        var(ok,msg,data)=await ExamApi.GenerateResultAsync(_confirmSem.BatchSemesterId);
+        _generating=false; _confirmBatch=null; _confirmSem=null;
+        if(ok&&data is not null)
+        {
+            _result=data;
+            _successMsg=$"Results generated! {data.PassedStudents}/{data.TotalStudents} passed. Avg SGPA: {data.ClassAverageSGPA:F2}";
+            _batches=await ExamApi.GetBatchesAsync();
+        }
+        else _errorMsg=msg;
+        _ = ClearMsg();
+    }
+
+    async Task DownloadClassPdf(int id)
+    {
+        _downloading=true;_dlType="class";
+        try{ var b=await Http.GetByteArrayAsync($"api/examiner/result/{id}/class-pdf"); await Js.DownloadPdfAsync(b,$"ClassResult_Sem{id}.pdf"); }
+        catch(Exception ex){_errorMsg=$"PDF failed: {ex.Message}"; _=ClearMsg();}
+        _downloading=false;_dlType="";
+    }
+
+    async Task DownloadAllCards(int id)
+    {
+        _downloading=true;_dlType="cards";
+        try{ var b=await Http.GetByteArrayAsync($"api/examiner/result/{id}/all-cards-zip"); await Js.DownloadZipAsync(b,$"ResultCards_Sem{id}.zip"); }
+        catch(Exception ex){_errorMsg=$"ZIP failed: {ex.Message}"; _=ClearMsg();}
+        _downloading=false;_dlType="";
+    }
+
+    async Task DownloadCard(int semId,int studentId,string regNo)
+    {
+        try{ var b=await Http.GetByteArrayAsync($"api/examiner/result/{semId}/student/{studentId}/pdf"); await Js.DownloadPdfAsync(b,$"ResultCard_{regNo}.pdf"); }
+        catch(Exception ex){_errorMsg=$"Card failed: {ex.Message}"; _=ClearMsg();}
+    }
+
+    async Task ClearMsg(){await Task.Delay(5000);_successMsg=null;_errorMsg=null;StateHasChanged();}
+    static string GpaColor(double g)=>g switch{>=3.5=>"var(--success)",>=2.5=>"var(--navy)",>=1.5=>"var(--warning)",_=>"var(--danger)"};
+}

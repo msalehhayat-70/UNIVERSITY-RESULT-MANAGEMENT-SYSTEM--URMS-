@@ -1,0 +1,601 @@
+@page "/examiner"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject ExaminerApiService Api
+@inject AuthStateService Auth
+@inject NotificationStateService NotifState
+@inject NavigationManager Nav
+
+<div class="page-header" style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">Examiner Dashboard</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">
+        @DateTime.Now.ToString("dddd, MMMM d, yyyy")
+    </p>
+</div>
+
+@if (_loading)
+{
+    <div class="loading-center">
+        <div class="spinner"></div>
+        <span>Loading dashboard...</span>
+    </div>
+}
+else if (_dashboard is not null)
+{
+    <!-- Stats Row -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-number">@_dashboard.TotalBatches</div>
+            <div class="stat-label">Active Batches</div>
+        </div>
+        <div class="stat-card gold">
+            <div class="stat-number">@_dashboard.TotalTeachers</div>
+            <div class="stat-label">Registered Teachers</div>
+        </div>
+        <div class="stat-card red">
+            <div class="stat-number">@_dashboard.PendingApprovals</div>
+            <div class="stat-label">Pending HOD Approvals</div>
+        </div>
+        <div class="stat-card green">
+            <div class="stat-number">@_dashboard.SemestersReadyForResult</div>
+            <div class="stat-label">Semesters Ready for Result</div>
+        </div>
+    </div>
+
+    @if (_successMsg is not null)
+    {
+        <div class="alert alert-success" style="margin-bottom:16px;">
+            <span>✓</span> @_successMsg
+        </div>
+    }
+    @if (_errorMsg is not null)
+    {
+        <div class="alert alert-danger" style="margin-bottom:16px;">
+            <span>✕</span> @_errorMsg
+        </div>
+    }
+
+    <!-- Batch Tree + Subject Panel -->
+    <div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start;">
+
+        <!-- Left: Batch Tree -->
+        <div class="card" style="padding:16px;">
+            <div class="card-header">
+                <h2>Batches & Semesters</h2>
+                <button class="btn btn-primary btn-sm" @onclick="() => _showBatchModal = true">+ Batch</button>
+            </div>
+            <div class="batch-tree">
+                @foreach (var batch in _dashboard.Batches)
+                {
+                    <div class="batch-node">
+                        <div class="batch-header @(_openBatches.Contains(batch.BatchId) ? "open" : "")"
+                             @onclick="() => ToggleBatch(batch.BatchId)">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <h3>@batch.BatchName</h3>
+                            <svg class="chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                        @if (_openBatches.Contains(batch.BatchId))
+                        {
+                            <div class="semester-list">
+                                @foreach (var sem in batch.Semesters)
+                                {
+                                    var pct = sem.TotalSubjects > 0
+                                        ? (int)((double)sem.ApprovedSubjects / sem.TotalSubjects * 100)
+                                        : 0;
+                                    var statusClass = sem.IsResultGenerated ? "status-done"
+                                        : sem.CanGenerateResult ? "status-ready"
+                                        : sem.TotalSubjects > 0 ? "status-pending"
+                                        : "status-empty";
+                                    var statusText = sem.IsResultGenerated ? "Done"
+                                        : sem.CanGenerateResult ? "Ready"
+                                        : sem.TotalSubjects > 0 ? $"{sem.ApprovedSubjects}/{sem.TotalSubjects}"
+                                        : "Empty";
+
+                                    <div class="semester-row @(_selectedSem?.BatchSemesterId == sem.BatchSemesterId ? "selected" : "")"
+                                         @onclick="() => SelectSemester(batch, sem)">
+                                        <span class="semester-label">Semester @sem.SemesterNo</span>
+                                        <div class="semester-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill @(pct==100 ? "complete" : "")"
+                                                     style="width:@(pct)%;"></div>
+                                            </div>
+                                        </div>
+                                        <span class="semester-status @statusClass">@statusText</span>
+                                        @if (sem.CanGenerateResult)
+                                        {
+                                            <button class="btn-generate" @onclick:stopPropagation="true"
+                                                    @onclick="() => ConfirmGenerateResult(batch, sem)">
+                                                Generate
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Right: Subject Configuration Panel -->
+        <div>
+            @if (_selectedSem is not null && _selectedBatch is not null)
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>@_selectedBatch.BatchName — Semester @_selectedSem.SemesterNo</h2>
+                            <p style="font-size:0.76rem;color:var(--gray-400);margin-top:2px;">
+                                @_subjects.Count subjects configured
+                                · @_subjects.Count(s => s.CreditHours >= 2) theory
+                                · @_subjects.Count(s => s.CreditHours == 1) lab
+                                · Total credits: @_subjects.Sum(s => s.CreditHours)
+                            </p>
+                        </div>
+                        <button class="btn btn-gold" @onclick="OpenAddSubject">+ Add Subject</button>
+                    </div>
+
+                    @if (_subjects.Any())
+                    {
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Subject</th>
+                                        <th>Code</th>
+                                        <th>Type</th>
+                                        <th>Credits</th>
+                                        <th>Max Marks</th>
+                                        <th>Assigned Teacher</th>
+                                        <th>Gradesheet</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @{ int i = 1; }
+                                    @foreach (var subj in _subjects)
+                                    {
+                                        <tr>
+                                            <td style="color:var(--gray-400)">@(i++)</td>
+                                            <td style="font-weight:600">@subj.SubjectName</td>
+                                            <td style="font-family:monospace;font-size:0.8rem">@subj.SubjectCode</td>
+                                            <td>
+                                                <span class="credit-badge @(subj.SubjectType == "Theory" ? "credit-theory" : "credit-lab")">
+                                                    @subj.SubjectType
+                                                </span>
+                                            </td>
+                                            <td style="font-weight:700;text-align:center">@subj.CreditHours</td>
+                                            <td style="text-align:center">@subj.MaxMarks</td>
+                                            <td>
+                                                <div style="font-weight:600;font-size:0.83rem">@subj.TeacherName</div>
+                                                <div style="color:var(--gray-400);font-size:0.72rem">@subj.TeacherEmail</div>
+                                            </td>
+                                            <td>
+                                                <span class="gs-badge @GetGsBadgeClass(subj.GradesheetStatus)">
+                                                    @subj.GradesheetStatus
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (!subj.IsLocked)
+                                                {
+                                                    <button class="btn-icon" title="Edit" @onclick="() => OpenEditSubject(subj)">
+                                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                                    </button>
+                                                    <button class="btn-icon" title="Delete" style="color:var(--danger)" @onclick="() => ConfirmDelete(subj)">
+                                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <span style="font-size:0.7rem;color:var(--gray-400)">🔒 Locked</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info">
+                            No subjects configured yet. Click <strong>+ Add Subject</strong> to register subjects for this semester.
+                            Teachers will only be able to upload grade sheets for registered subjects.
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="card" style="text-align:center;padding:60px;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" style="margin:0 auto 16px;display:block"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <p style="color:var(--gray-400);font-size:0.88rem;">Select a batch and semester from the left panel to view or configure subjects.</p>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<!-- ── Add/Edit Subject Modal ──────────────────────────────────────── -->
+@if (_showSubjectModal)
+{
+    <div class="modal-overlay" @onclick="CloseSubjectModal">
+        <div class="modal" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>@(_editSubject is null ? "Add Subject" : "Edit Subject")</h3>
+                <button class="btn-icon" @onclick="CloseSubjectModal">✕</button>
+            </div>
+            <div class="modal-body">
+                @if (_modalError is not null)
+                {
+                    <div class="alert alert-danger">@_modalError</div>
+                }
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Subject Name *</label>
+                        <input @bind="_subjectForm.SubjectName" placeholder="e.g. Object-Oriented Programming" />
+                    </div>
+                    <div class="form-group">
+                        <label>Subject Code *</label>
+                        <input @bind="_subjectForm.SubjectCode" placeholder="e.g. CS201" style="text-transform:uppercase" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Subject Type *</label>
+                        <select @bind="_subjectForm.SubjectType">
+                            <option value="Theory">Theory</option>
+                            <option value="Laboratory">Laboratory</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Credit Hours * <span style="font-weight:400;color:var(--gray-400)">(Theory=2-3, Lab=1)</span></label>
+                        <input type="number" @bind="_subjectForm.CreditHours" min="1" max="4" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Maximum Marks</label>
+                        <input type="number" @bind="_subjectForm.MaxMarks" min="1" max="200" />
+                    </div>
+                    <div class="form-group">
+                        <label>Assigned Teacher *</label>
+                        <select @bind="_subjectForm.TeacherId">
+                            <option value="0">— Select Teacher —</option>
+                            @foreach (var t in _teachers)
+                            {
+                                <option value="@t.UserId">@t.FullName (@t.Email)</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="alert alert-info" style="font-size:0.8rem;margin-top:8px;">
+                    <strong>Credit Hour Impact:</strong> A theory subject with 3 credit hours contributes 3× more to SGPA
+                    than a lab with 1 credit hour. SGPA = Σ(Grade Points × Credit Hours) / Σ(Credit Hours)
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @onclick="CloseSubjectModal">Cancel</button>
+                <button class="btn btn-gold" @onclick="SaveSubject" disabled="@_saving">
+                    @if (_saving) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                    @(_editSubject is null ? "Add Subject" : "Save Changes")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Add Batch Modal ─────────────────────────────────────────────── -->
+@if (_showBatchModal)
+{
+    <div class="modal-overlay" @onclick="() => _showBatchModal = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Create New Batch</h3>
+                <button class="btn-icon" @onclick="() => _showBatchModal = false">✕</button>
+            </div>
+            <div class="modal-body">
+                @if (_batchError is not null)
+                {
+                    <div class="alert alert-danger">@_batchError</div>
+                }
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Program</label>
+                        <select @bind="_batchForm.ProgramId">
+                            <option value="0">— Select —</option>
+                            <option value="1">BS Computer Science</option>
+                            <option value="2">BS Computer Engineering</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Batch Number</label>
+                        <input type="number" @bind="_batchForm.BatchNumber" placeholder="e.g. 12" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Semester Type</label>
+                        <select @bind="_batchForm.SemesterType">
+                            <option value="FALL">FALL</option>
+                            <option value="SPRING">SPRING</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Year</label>
+                        <input type="number" @bind="_batchForm.Year" placeholder="e.g. 2026" />
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @onclick="() => _showBatchModal = false">Cancel</button>
+                <button class="btn btn-primary" @onclick="CreateBatch" disabled="@_saving">
+                    @if (_saving) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                    Create Batch
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Confirm Delete Modal ───────────────────────────────────────── -->
+@if (_deleteSubject is not null)
+{
+    <div class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Confirm Delete</h3>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    Are you sure you want to delete <strong>@_deleteSubject.SubjectName</strong> (@_deleteSubject.SubjectCode)?
+                    This will also remove the teacher assignment. This action cannot be undone.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @onclick="() => _deleteSubject = null">Cancel</button>
+                <button class="btn btn-danger" @onclick="ExecuteDelete">Yes, Delete</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Confirm Generate Result ────────────────────────────────────── -->
+@if (_generateSem is not null)
+{
+    <div class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Generate Result</h3>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <div>
+                        <strong>@_generateBatch?.BatchName — Semester @_generateSem.SemesterNo</strong><br/>
+                        <span style="font-size:0.82rem;margin-top:4px;display:block">
+                            This will compute credit-hour-weighted SGPA for all students and update their CGPA.
+                            Result cards (class PDF + individual PDFs) will be available after generation.
+                            This action cannot be undone.
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" @onclick="() => { _generateSem = null; _generateBatch = null; }">Cancel</button>
+                <button class="btn btn-gold" @onclick="ExecuteGenerateResult" disabled="@_generating">
+                    @if (_generating) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+                    Generate Result
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    bool _loading = true;
+    ExaminerDashboardDto? _dashboard;
+    List<TeacherDto> _teachers = new();
+    List<SubjectConfigDto> _subjects = new();
+    HashSet<int> _openBatches = new();
+    BatchDto? _selectedBatch;
+    BatchSemesterDto? _selectedSem;
+    string? _successMsg, _errorMsg, _modalError, _batchError;
+    bool _saving, _generating;
+    bool _showSubjectModal, _showBatchModal;
+
+    SubjectConfigDto? _editSubject;
+    SubjectConfigDto? _deleteSubject;
+    BatchDto? _generateBatch;
+    BatchSemesterDto? _generateSem;
+
+    // Form models
+    CreateSubjectConfigRequest _subjectForm = new() { CreditHours = 3, MaxMarks = 100, SubjectType = "Theory" };
+    CreateBatchRequest _batchForm = new() { SemesterType = "FALL", Year = DateTime.Now.Year };
+
+   protected override async Task OnInitializedAsync()
+{
+    await Auth.InitializeAsync();
+    
+    if (!Auth.IsAuthenticated)
+    {
+        Nav.NavigateTo("/login");
+        return;
+    }
+
+    try
+    {
+        _dashboard = await Api.GetDashboardAsync();
+        _teachers  = await Api.GetTeachersAsync();
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+    {
+        Nav.NavigateTo("/login");
+        return;
+    }
+    catch { }
+    finally
+    {
+        _loading = false;
+    }
+}
+
+    void ToggleBatch(int batchId)
+    {
+        if (!_openBatches.Add(batchId)) _openBatches.Remove(batchId);
+    }
+
+    async Task SelectSemester(BatchDto batch, BatchSemesterDto sem)
+    {
+        _selectedBatch = batch;
+        _selectedSem   = sem;
+        _subjects      = await Api.GetSubjectsAsync(sem.BatchSemesterId);
+    }
+
+    void OpenAddSubject()
+    {
+        _editSubject  = null;
+        _modalError   = null;
+        _subjectForm  = new CreateSubjectConfigRequest
+        {
+            BatchSemesterId = _selectedSem!.BatchSemesterId,
+            CreditHours     = 3,
+            MaxMarks        = 100,
+            SubjectType     = "Theory"
+        };
+        _showSubjectModal = true;
+    }
+
+    void OpenEditSubject(SubjectConfigDto s)
+    {
+        _editSubject = s;
+        _modalError  = null;
+        _subjectForm = new CreateSubjectConfigRequest
+        {
+            BatchSemesterId = s.BatchSemesterId,
+            SubjectName     = s.SubjectName,
+            SubjectCode     = s.SubjectCode,
+            CreditHours     = s.CreditHours,
+            SubjectType     = s.SubjectType,
+            TeacherId       = s.TeacherId,
+            MaxMarks        = s.MaxMarks
+        };
+        _showSubjectModal = true;
+    }
+
+    void CloseSubjectModal() { _showSubjectModal = false; _editSubject = null; _modalError = null; }
+
+    async Task SaveSubject()
+    {
+        _modalError = null;
+        if (string.IsNullOrWhiteSpace(_subjectForm.SubjectName)) { _modalError = "Subject name is required."; return; }
+        if (string.IsNullOrWhiteSpace(_subjectForm.SubjectCode)) { _modalError = "Subject code is required."; return; }
+        if (_subjectForm.TeacherId == 0) { _modalError = "Please select a teacher."; return; }
+        if (_subjectForm.CreditHours < 1 || _subjectForm.CreditHours > 4) { _modalError = "Credit hours must be 1–4."; return; }
+
+        _saving = true;
+        if (_editSubject is null)
+        {
+            var (ok, msg, _) = await Api.AddSubjectAsync(_subjectForm);
+            if (!ok) { _modalError = msg; _saving = false; return; }
+            _successMsg = $"Subject '{_subjectForm.SubjectName}' added. Teacher has been notified.";
+        }
+        else
+        {
+            var req = new UpdateSubjectConfigRequest
+            {
+                SubjectName = _subjectForm.SubjectName,
+                SubjectCode = _subjectForm.SubjectCode,
+                CreditHours = _subjectForm.CreditHours,
+                SubjectType = _subjectForm.SubjectType,
+                TeacherId   = _subjectForm.TeacherId,
+                MaxMarks    = _subjectForm.MaxMarks
+            };
+            var (ok, msg) = await Api.UpdateSubjectAsync(_editSubject.ConfigId, req);
+            if (!ok) { _modalError = msg; _saving = false; return; }
+            _successMsg = "Subject updated.";
+        }
+
+        _saving = false;
+        _showSubjectModal = false;
+        _subjects = await Api.GetSubjectsAsync(_selectedSem!.BatchSemesterId);
+        _dashboard = await Api.GetDashboardAsync();
+        _ = ClearSuccess();
+    }
+
+    void ConfirmDelete(SubjectConfigDto s) => _deleteSubject = s;
+
+    async Task ExecuteDelete()
+    {
+        if (_deleteSubject is null) return;
+        var (ok, msg) = await Api.DeleteSubjectAsync(_deleteSubject.ConfigId);
+        _deleteSubject = null;
+        if (ok)
+        {
+            _subjects = await Api.GetSubjectsAsync(_selectedSem!.BatchSemesterId);
+            _dashboard = await Api.GetDashboardAsync();
+            _successMsg = "Subject deleted.";
+            _ = ClearSuccess();
+        }
+        else _errorMsg = msg;
+    }
+
+    async Task CreateBatch()
+    {
+        _batchError = null;
+        if (_batchForm.ProgramId == 0) { _batchError = "Please select a program."; return; }
+        if (_batchForm.BatchNumber <= 0) { _batchError = "Enter a valid batch number."; return; }
+        _saving = true;
+        var result = await Api.CreateBatchAsync(_batchForm);
+        _saving = false;
+        if (result is null) { _batchError = "Failed to create batch."; return; }
+        _showBatchModal = false;
+        _dashboard = await Api.GetDashboardAsync();
+        _successMsg = $"Batch {result.BatchName} created with 8 semester slots.";
+        _ = ClearSuccess();
+    }
+
+    void ConfirmGenerateResult(BatchDto batch, BatchSemesterDto sem)
+    {
+        _generateBatch = batch;
+        _generateSem   = sem;
+    }
+
+    async Task ExecuteGenerateResult()
+    {
+        if (_generateSem is null) return;
+        _generating = true;
+        var (ok, msg, data) = await Api.GenerateResultAsync(_generateSem.BatchSemesterId);
+        _generating = false;
+        _generateSem   = null;
+        _generateBatch = null;
+
+        if (ok && data is not null)
+        {
+            _successMsg = $"Result generated! {data.PassedStudents}/{data.TotalStudents} passed. Avg SGPA: {data.ClassAverageSGPA:F2}";
+            _dashboard  = await Api.GetDashboardAsync();
+            if (_selectedSem is not null)
+                _subjects = await Api.GetSubjectsAsync(_selectedSem.BatchSemesterId);
+        }
+        else _errorMsg = msg;
+
+        _ = ClearSuccess();
+    }
+
+    static string GetGsBadgeClass(string status) => status switch
+    {
+        "Approved"    => "gs-approved",
+        "Rejected"    => "gs-rejected",
+        "Pending"     => "gs-pending",
+        "Customised"  => "gs-pending",
+        _             => "gs-not-uploaded"
+    };
+
+    async Task ClearSuccess()
+    {
+        await Task.Delay(5000);
+        _successMsg = null;
+        _errorMsg   = null;
+        StateHasChanged();
+    }
+}

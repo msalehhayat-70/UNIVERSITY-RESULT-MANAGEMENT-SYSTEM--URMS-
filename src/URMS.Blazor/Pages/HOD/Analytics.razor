@@ -1,0 +1,233 @@
+@page "/hod/analytics"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject HODApiService HodApi
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">📊 Analytics Dashboard</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">
+        AI-driven batch analytics — performance insights, at-risk students, teacher rankings.
+    </p>
+</div>
+
+<div class="card" style="margin-bottom:20px;padding:14px 20px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <label style="font-size:0.85rem;font-weight:600;color:var(--navy);">Batch:</label>
+        <select @onchange="OnBatchChanged"
+            style="padding:7px 12px;border:1px solid var(--gray-100);border-radius:6px;font-size:0.85rem;min-width:240px;">
+            <option value="0">— Choose Batch —</option>
+            @foreach (var b in _batches)
+            {
+                <option value="@b.BatchId">@b.BatchName</option>
+            }
+        </select>
+        <select @onchange="OnSemesterChanged"
+                style="padding:7px 12px;border:1px solid var(--gray-100);border-radius:6px;font-size:0.85rem;">
+            @for (int s = 1; s <= 8; s++)
+            {
+                <option value="@s">Semester @s</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="loading-center"><div class="spinner"></div><span>Analysing data...</span></div>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_analytics is not null)
+{
+    <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stat-card"><div class="stat-number">@_analytics.TotalStudents</div><div class="stat-label">Total Students</div></div>
+        <div class="stat-card green"><div class="stat-number">@_analytics.PassedStudents</div><div class="stat-label">Passed</div></div>
+        <div class="stat-card red"><div class="stat-number">@_analytics.FailedStudents</div><div class="stat-label">Failed</div></div>
+        <div class="stat-card gold"><div class="stat-number">@_analytics.ClassAvgSGPA.ToString("F2")</div><div class="stat-label">Avg SGPA</div></div>
+        <div class="stat-card red"><div class="stat-number" style="font-size:1.4rem;">@_analytics.AtRiskCount</div><div class="stat-label">⚠ At-Risk</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+
+        <!-- Top 3 Students -->
+        <div class="card">
+            <div class="card-header"><h2>🏆 Top 3 Positions (SGPA)</h2></div>
+            @if (_analytics.TopStudents.Any())
+            {
+                @foreach (var posGroup in _analytics.TopStudents.GroupBy(s => s.Rank).OrderBy(g => g.Key))
+                {
+                    var posRank = posGroup.Key;
+                    var medal = posRank == 1 ? "🥇" : posRank == 2 ? "🥈" : "🥉";
+                    var bgColor = posRank == 1 ? "#FEF9E7" : posRank == 2 ? "#F2F3F4" : "#FDF2E9";
+                    var borderColor = posRank == 1 ? "var(--gold)" : posRank == 2 ? "#AAB7B8" : "#E59866";
+                    var label = posRank == 1 ? "1st Position" : posRank == 2 ? "2nd Position" : "3rd Position";
+
+                    <div style="margin-bottom:18px;">
+                        <div style="font-size:0.78rem;font-weight:700;color:var(--gray-400);
+                                    text-transform:uppercase;letter-spacing:0.05em;
+                                    margin-bottom:8px;padding-left:4px;">
+                            @medal @label
+                        </div>
+                        @foreach (var st in posGroup)
+                        {
+                            <div style="margin-bottom:8px;padding:14px 16px;background:@bgColor;
+                                        border-radius:10px;border-left:4px solid @borderColor;">
+                                <div style="display:flex;align-items:center;gap:12px;">
+                                    <div style="flex:1;">
+                                        <div style="font-size:0.92rem;font-weight:700;color:var(--navy);">
+                                            @st.Name
+                                        </div>
+                                        <div style="font-size:0.78rem;color:var(--gray-400);margin-top:2px;">
+                                            Reg No: @st.RegNo
+                                        </div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div style="font-size:1.3rem;font-weight:700;color:var(--navy);">
+                                            @st.SGPA.ToString("F2")
+                                        </div>
+                                        <div style="font-size:0.72rem;color:var(--gray-400);">SGPA</div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <p style="color:var(--gray-400);text-align:center;padding:20px;">
+                    No result data available for this semester.
+                </p>
+            }
+        </div>
+
+        <!-- Teacher Performance -->
+        <div class="card">
+            <div class="card-header"><h2>Teacher Performance Ranking</h2></div>
+            @{ int tRank = 1; }
+            @foreach (var t in _analytics.TeacherStats.OrderByDescending(t => t.PassRate))
+            {
+                var tMedal = tRank == 1 ? "🥇" : tRank == 2 ? "🥈" : tRank == 3 ? "🥉" : $"#{tRank}";
+                var pct = (int)t.PassRate;
+                <div style="margin-bottom:14px;padding:10px;background:var(--gray-50);border-radius:8px;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                        <span style="font-size:1.1rem;">@tMedal</span>
+                        <div style="flex:1;">
+                            <div style="font-size:0.85rem;font-weight:700;color:var(--navy);">@t.TeacherName</div>
+                            <div style="font-size:0.72rem;color:var(--gray-400);">@t.SubjectName (@t.CreditHours CH)</div>
+                        </div>
+                        <span style="font-size:0.85rem;font-weight:700;color:@(pct>=75?"var(--success)":"var(--warning)");">@pct% pass</span>
+                    </div>
+                    <div style="height:6px;background:var(--gray-100);border-radius:3px;overflow:hidden;">
+                        <div style="height:100%;width:@pct%;background:@(pct>=75?"var(--success)":"var(--warning)");border-radius:3px;"></div>
+                    </div>
+                </div>
+                tRank++;
+            }
+        </div>
+    </div>
+
+    @if (_analytics.AtRiskStudents.Any())
+    {
+        <div class="card" style="margin-bottom:20px;border-left:4px solid var(--danger);">
+            <div class="card-header">
+                <h2>⚠ At-Risk Students (@_analytics.AtRiskStudents.Count)</h2>
+                <span style="font-size:0.78rem;color:var(--gray-400);">Declining SGPA or CGPA below 2.0</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>#</th><th>Reg No</th><th>Name</th><th>CGPA</th><th>Risk Reason</th></tr>
+                    </thead>
+                    <tbody>
+                        @{ int ri = 1; }
+                        @foreach (var st in _analytics.AtRiskStudents)
+                        {
+                            <tr style="background:#FFF5F5;">
+                                <td style="color:var(--gray-400)">@(ri++)</td>
+                                <td style="font-family:monospace;font-size:0.82rem">@st.RegNo</td>
+                                <td style="font-weight:600">@st.Name</td>
+                                <td style="font-weight:700;color:var(--danger)">@st.CGPA.ToString("F2")</td>
+                                <td style="font-size:0.78rem;color:var(--warning)">@st.RiskReason</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+   
+}
+else if (_selBatchId > 0)
+{
+    <div class="card" style="text-align:center;padding:60px;">
+        <p style="color:var(--gray-400);">No result data for this batch/semester. Generate results first.</p>
+    </div>
+}
+else
+{
+    <div class="card" style="text-align:center;padding:60px;">
+        <p style="color:var(--gray-400);">Select a batch and semester above to view analytics.</p>
+    </div>
+}
+
+@code {
+    List<BatchDto> _batches = new();
+    BatchAnalyticsDto? _analytics;
+    int _selBatchSemesterId = 0;
+    int _selBatchId = 0;
+    int _selSemester = 1;
+    bool _loading;
+    string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _batches = await HodApi.GetBatchesAsync();
+    }
+
+    async Task OnBatchChanged(ChangeEventArgs e)
+    {
+        _selBatchId = int.Parse(e.Value?.ToString() ?? "0");
+        await UpdateSemesterId();
+    }
+
+    async Task OnSemesterChanged(ChangeEventArgs e)
+    {
+        _selSemester = int.Parse(e.Value?.ToString() ?? "1");
+        await UpdateSemesterId();
+    }
+
+    async Task UpdateSemesterId()
+    {
+        if (_selBatchId == 0) return;
+        var batch = _batches.FirstOrDefault(b => b.BatchId == _selBatchId);
+        var sem = batch?.Semesters.FirstOrDefault(s => s.SemesterNo == _selSemester);
+        _selBatchSemesterId = sem?.BatchSemesterId ?? 0;
+        await LoadAnalytics();
+    }
+
+    async Task LoadAnalytics()
+    {
+        if (_selBatchSemesterId == 0) return;
+        _loading = true;
+        _error = null;
+        _analytics = null;
+        StateHasChanged();
+
+        try
+        {
+            _analytics = await HodApi.GetAnalyticsAsync(_selBatchSemesterId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load analytics: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,0 +1,142 @@
+@page "/examiner/teachers"
+@using URMS.Models.DTOs
+@using URMS.Blazor.Services
+@inject ExaminerApiService Api
+@inject AuthStateService Auth
+
+<div style="margin-bottom:24px;">
+    <h1 style="font-size:1.3rem;font-weight:700;color:var(--navy);">Manage Teachers</h1>
+    <p style="color:var(--gray-400);font-size:0.85rem;margin-top:4px;">
+        Create teacher accounts and view assignments.
+    </p>
+</div>
+
+@if (_success is not null)
+{
+    <div class="alert alert-success">✓ @_success</div>
+}
+@if (_error is not null)
+{
+    <div class="alert alert-danger">✕ @_error</div>
+}
+
+<div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+
+    <!-- Teacher List -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Registered Teachers (@_teachers.Count)</h2>
+        </div>
+        @if (_loading)
+        {
+            <div class="loading-center"><div class="spinner"></div></div>
+        }
+        else if (_teachers.Any())
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>Assigned Subjects</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{ int i = 1; }
+                        @foreach (var t in _teachers)
+                        {
+                            <tr>
+                                <td style="color:var(--gray-400)">@(i++)</td>
+                                <td style="font-weight:600">@t.FullName</td>
+                                <td style="font-size:0.82rem;color:var(--gray-400)">@t.Email</td>
+                                <td style="text-align:center">
+                                    <span class="credit-badge credit-theory">@t.AssignedSubjects subjects</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">No teachers registered yet. Create the first teacher account using the form.</div>
+        }
+    </div>
+
+    <!-- Create Teacher Form -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Create Teacher Account</h2>
+        </div>
+        <div class="form-group">
+            <label>Full Name *</label>
+            <input @bind="_form.FullName" placeholder="e.g. Dr. Ahmed Khan" />
+        </div>
+        <div class="form-group">
+            <label>Email Address *</label>
+            <input type="email" @bind="_form.Email" placeholder="teacher@kicsit.edu.pk" />
+        </div>
+        <div class="form-group">
+            <label>Temporary Password *</label>
+            <input type="text" @bind="_form.Password" placeholder="Share this with the teacher" />
+            <p style="font-size:0.72rem;color:var(--gray-400);margin-top:4px;">
+                The teacher will use this to log in for the first time.
+            </p>
+        </div>
+        <button class="btn btn-gold" style="width:100%;justify-content:center;" @onclick="CreateTeacher" disabled="@_saving">
+            @if (_saving) { <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div> }
+            Create Teacher Account
+        </button>
+
+        @if (_createdCredentials is not null)
+        {
+            <div class="alert alert-success" style="margin-top:14px;font-size:0.82rem;">
+                <div>
+                    <strong>✓ Account Created</strong><br/>
+                    Share these credentials with the teacher:<br/>
+                    <strong>Email:</strong> @_createdCredentials.Value.email<br/>
+                    <strong>Password:</strong> @_createdCredentials.Value.password
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    List<TeacherDto> _teachers = new();
+    CreateTeacherRequest _form = new();
+    bool _loading = true, _saving;
+    string? _success, _error;
+    (string email, string password)? _createdCredentials;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _teachers = await Api.GetTeachersAsync();
+        _loading  = false;
+    }
+
+    async Task CreateTeacher()
+    {
+        _success = _error = null; _createdCredentials = null;
+        if (string.IsNullOrWhiteSpace(_form.FullName) || string.IsNullOrWhiteSpace(_form.Email) || string.IsNullOrWhiteSpace(_form.Password))
+        { _error = "All fields are required."; return; }
+
+        _saving = true;
+        var email = _form.Email;
+        var pass  = _form.Password;
+        var (ok, msg) = await Api.CreateTeacherAsync(_form);
+        _saving = false;
+
+        if (ok)
+        {
+            _createdCredentials = (email, pass);
+            _success  = $"Teacher account created for {_form.FullName}.";
+            _form     = new();
+            _teachers = await Api.GetTeachersAsync();
+        }
+        else _error = msg;
+    }
+}
